@@ -17,6 +17,8 @@ The server state layer now provides a persistent request reservation ledger, bou
 
 The `/acg status`, `/acg compatibility`, and `/acg cleanup-report` commands require permission level 2. Reservation state is stored in `aeronauticscompatguard/reservations.json`; quarantine records are appended to `aeronauticscompatguard/quarantine/events.jsonl`.
 
+On disk load, invalid item stacks and missing `alexsmobs` / `guardvillagers` entity types are quarantined instead of entering the live world. Chunk load also removes block entities whose current block state is air, after recording the location and type. These paths are intentionally limited to loaded save data; they do not cancel normal newly spawned entities.
+
 ## Build
 
 ```powershell
