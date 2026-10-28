@@ -30,6 +30,9 @@ public final class StableItemHandler implements IItemHandlerModifiable {
 
     @Override
     public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
+        if (stack == null || stack.isEmpty()) {
+            return ItemStack.EMPTY;
+        }
         IItemHandlerModifiable handler = currentHandler.get();
         if (handler == null || slot < 0 || slot >= handler.getSlots()) {
             return stack;
@@ -39,6 +42,9 @@ public final class StableItemHandler implements IItemHandlerModifiable {
 
     @Override
     public ItemStack extractItem(int slot, int amount, boolean simulate) {
+        if (amount <= 0) {
+            return ItemStack.EMPTY;
+        }
         IItemHandlerModifiable handler = currentHandler.get();
         if (handler == null || slot < 0 || slot >= handler.getSlots()) {
             return ItemStack.EMPTY;
