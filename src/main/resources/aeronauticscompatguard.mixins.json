@@ -5,7 +5,8 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "MineColoniesWarehouseHandlerMixin",
-    "CraterLibConfigRegistrationMixin"
+    "CraterLibConfigRegistrationMixin",
+    "RemovedEntityPairingMixin"
   ],
   "injectors": {
     "defaultRequire": 0

@@ -14,6 +14,7 @@ public final class CompatibilityPatchRegistry {
     public static final String MINECOLONIES_CREATE_HANDLER = "minecolonies.create.handler_refresh";
     public static final String SABLE_IRIS_VEIL_BOOL_UNIFORMS = "sable.iris.veil.bool_uniforms";
     public static final String CRATERLIB_CONFIG_IDEMPOTENCY = "craterlib.simplerpc.config_idempotency";
+    public static final String MINECRAFT_REMOVED_ENTITY_TRACKER = "minecraft.removed_entity_tracker";
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<String, Boolean> ACTIVATION = new ConcurrentHashMap<>();
@@ -46,7 +47,16 @@ public final class CompatibilityPatchRegistry {
                                     new ModRequirement("simplerpc", Set.of("4.1.4"))),
                             "com.hypherionmc.craterlib.core.config.ConfigController",
                             "register_config",
-                            List.of("com.hypherionmc.craterlib.core.config.AbstractConfig")))
+                            List.of("com.hypherionmc.craterlib.core.config.AbstractConfig")),
+                    new Adapter(
+                            MINECRAFT_REMOVED_ENTITY_TRACKER,
+                            "server removed-entity pairing guard",
+                            List.of(),
+                            "net.minecraft.server.level.ServerEntity",
+                            "sendPairingData",
+                            List.of(
+                                    "net.minecraft.server.level.ServerPlayer",
+                                    "java.util.function.Consumer")))
             .stream()
             .collect(Collectors.toUnmodifiableMap(Adapter::id, adapter -> adapter));
 
