@@ -2,6 +2,7 @@ package dev.aeronautics.compatguard.client.mixin;
 
 import com.mojang.blaze3d.shaders.Shader;
 import com.mojang.blaze3d.shaders.Uniform;
+import dev.aeronautics.compatguard.compat.CompatibilityPatchRegistry;
 import net.minecraft.client.renderer.ShaderInstance;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.system.MemoryStack;
@@ -41,6 +42,11 @@ public abstract class ShaderInstanceBoolUniformCompatMixin implements Shader {
 
     @Inject(method = "updateLocations", at = @At("TAIL"), require = 0, order = 10000)
     private void aeronauticsCompatGuard$registerBooleanUniforms(CallbackInfo callback) {
+        if (!CompatibilityPatchRegistry.isEnabled(
+                CompatibilityPatchRegistry.SABLE_IRIS_VEIL_BOOL_UNIFORMS)) {
+            return;
+        }
+
         int uniformCount = GL20C.glGetProgrami(programId, GL20C.GL_ACTIVE_UNIFORMS);
         int maxUniformLength = GL20C.glGetProgrami(programId, GL20C.GL_ACTIVE_UNIFORM_MAX_LENGTH);
 

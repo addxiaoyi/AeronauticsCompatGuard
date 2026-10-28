@@ -1,6 +1,7 @@
 package dev.aeronautics.compatguard;
 
 import com.mojang.logging.LogUtils;
+import dev.aeronautics.compatguard.compat.CompatibilityPatchRegistry;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
 
@@ -11,5 +12,6 @@ public final class AeronauticsCompatGuard {
 
     public AeronauticsCompatGuard() {
         LOGGER.info("Aeronautics Compat Guard initialized");
+        CompatibilityPatchRegistry.logEnabledAdapters();
     }
 }

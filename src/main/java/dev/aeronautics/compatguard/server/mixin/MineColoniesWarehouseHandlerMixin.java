@@ -1,15 +1,14 @@
 package dev.aeronautics.compatguard.server.mixin;
 
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
+import dev.aeronautics.compatguard.compat.CompatibilityPatchRegistry;
 import dev.aeronautics.compatguard.server.MineColoniesHandlerAccess;
 import dev.aeronautics.compatguard.server.StableItemHandler;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.items.IItemHandler;
 import net.neoforged.neoforge.items.IItemHandlerModifiable;
-import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.Shadow;
@@ -18,7 +17,6 @@ import org.spongepowered.asm.mixin.injection.At;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.Supplier;
 
 @Pseudo
 @Mixin(targets = "com.minecolonies.core.tileentities.TileEntityColonyBuilding", remap = false)
@@ -41,8 +39,8 @@ public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesH
                 || !original.getClass().getName().equals(
                         "com.minecolonies.api.inventory.api.CombinedItemHandler")
                 || AERONAUTICS_COMPATGUARD_RESOLVING.get()
-                || !ModList.get().isLoaded("minecolonies")
-                || !ModList.get().isLoaded("create")) {
+                || !CompatibilityPatchRegistry.isEnabled(
+                        CompatibilityPatchRegistry.MINECOLONIES_CREATE_HANDLER)) {
             return original;
         }
 
