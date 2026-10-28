@@ -58,6 +58,15 @@ public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesH
 
     @Override
     public IItemHandler aeronauticsCompatGuard$getRawHandler(Direction side) {
+        BlockEntity blockEntity = (BlockEntity) (Object) this;
+        Level level = blockEntity.getLevel();
+        if (blockEntity.isRemoved()
+                || level == null
+                || level.isClientSide
+                || !level.hasChunkAt(blockEntity.getBlockPos())) {
+            return null;
+        }
+
         boolean resolving = AERONAUTICS_COMPATGUARD_RESOLVING.get();
         AERONAUTICS_COMPATGUARD_RESOLVING.set(true);
         try {
