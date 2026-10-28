@@ -11,9 +11,9 @@ The client adapters repair boolean shader uniforms that Veil skips when Sable an
 
 The current tested target matrix is Minecraft 1.21.1 / NeoForge 21.1.250, MineColonies 1.1.1405 + Create 6.0.10, Sable 2.0.5 + Iris 1.8.14-beta.1 + Veil 4.3.2, and CraterLib 3.1.3 + SimpleRPC 4.1.4. The broader goal is modpack-wide compatibility; each new adapter still needs a reproducible conflict, a version-specific fix, and client/server validation before it is enabled. Invalid item stacks and non-positive extraction requests are rejected at the compatibility boundary.
 
-The first server fix addresses stale MineColonies item-handler references. It does not yet add a Create-to-colony request bridge, fluid transfer, persistent stock reservations, chunk tickets, or TPS scheduling controls. Those need separate server-side designs and world tests before they should be enabled by default.
+The server primitives include request-keyed item reservations and an in-flight ledger, but they are not yet wired into MineColonies/Create request and package callbacks. Fluid transfer and ticket ownership remain unimplemented until a supported public API path is identified.
 
-The server state layer now provides a persistent request reservation ledger, bounded per-tick work queue, startup world metadata manifest, quarantine event log, server-thread rejection counter, and slow-tick counter. Startup manifests are metadata markers only; a full world backup must still be created by the server operator before automatic cleanup.
+The server state layer provides a persistent request reservation ledger, bounded per-tick work queue, full startup world snapshots (three retained), quarantine event log with raw data hashes, server-thread rejection counter, chunk-retention probes, entity churn metrics, and slow-tick counter. Automatic invalid block-entity cleanup waits until the startup snapshot succeeds.
 
 The `/acg status`, `/acg compatibility`, and `/acg cleanup-report` commands require permission level 2. Reservation state is stored in `aeronauticscompatguard/reservations.json`; quarantine records are appended to `aeronauticscompatguard/quarantine/events.jsonl`.
 

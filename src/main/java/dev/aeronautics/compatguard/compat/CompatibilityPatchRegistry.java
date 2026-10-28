@@ -16,6 +16,8 @@ public final class CompatibilityPatchRegistry {
     public static final String CRATERLIB_CONFIG_IDEMPOTENCY = "craterlib.simplerpc.config_idempotency";
     public static final String MINECRAFT_REMOVED_ENTITY_TRACKER = "minecraft.removed_entity_tracker";
     public static final String MINECRAFT_INVALID_ITEM_STACK = "minecraft.invalid_item_stack";
+    public static final String MINECRAFT_UNKNOWN_ENTITY_DATA = "minecraft.unknown_entity_data";
+    public static final String NEOFORGE_UNKNOWN_ATTACHMENT = "neoforge.unknown_attachment";
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<String, Boolean> ACTIVATION = new ConcurrentHashMap<>();
@@ -66,7 +68,26 @@ public final class CompatibilityPatchRegistry {
                             "parse",
                             List.of(
                                     "net.minecraft.core.HolderLookup$Provider",
-                                    "net.minecraft.nbt.Tag")))
+                                    "net.minecraft.nbt.Tag")),
+                    new Adapter(
+                            MINECRAFT_UNKNOWN_ENTITY_DATA,
+                            "unknown entity save quarantine",
+                            List.of(),
+                            "net.minecraft.world.entity.EntityType",
+                            "loadEntityRecursive",
+                            List.of(
+                                    "net.minecraft.nbt.CompoundTag",
+                                    "net.minecraft.world.level.Level",
+                                    "java.util.function.Function")),
+                    new Adapter(
+                            NEOFORGE_UNKNOWN_ATTACHMENT,
+                            "unknown data attachment quarantine",
+                            List.of(),
+                            "net.neoforged.neoforge.attachment.AttachmentHolder",
+                            "deserializeAttachments",
+                            List.of(
+                                    "net.minecraft.core.HolderLookup$Provider",
+                                    "net.minecraft.nbt.CompoundTag")))
             .stream()
             .collect(Collectors.toUnmodifiableMap(Adapter::id, adapter -> adapter));
 
@@ -121,11 +142,25 @@ public final class CompatibilityPatchRegistry {
             Class<?>[] parameterTypes = adapter.parameterTypes().stream()
                     .map(type -> loadClass(type, loader))
                     .toArray(Class<?>[]::new);
-            owner.getMethod(adapter.targetMethod(), parameterTypes);
+            findTargetMethod(owner, adapter.targetMethod(), parameterTypes);
             return null;
         } catch (ReflectiveOperationException | LinkageError | RuntimeException error) {
             return "target API unavailable: " + adapter.targetClass() + "#" + adapter.targetMethod();
         }
+    }
+
+    private static void findTargetMethod(Class<?> owner, String name, Class<?>[] parameters)
+            throws NoSuchMethodException {
+        Class<?> current = owner;
+        while (current != null) {
+            try {
+                current.getDeclaredMethod(name, parameters);
+                return;
+            } catch (NoSuchMethodException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new NoSuchMethodException(owner.getName() + "#" + name);
     }
 
     private static Class<?> loadClass(String name, ClassLoader loader) {

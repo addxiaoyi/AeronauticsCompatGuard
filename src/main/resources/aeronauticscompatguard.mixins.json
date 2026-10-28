@@ -7,7 +7,9 @@
     "MineColoniesWarehouseHandlerMixin",
     "CraterLibConfigRegistrationMixin",
     "RemovedEntityPairingMixin",
-    "InvalidItemStackParseMixin"
+    "InvalidItemStackParseMixin",
+    "UnknownEntityDataMixin",
+    "UnknownAttachmentDataMixin"
   ],
   "injectors": {
     "defaultRequire": 0

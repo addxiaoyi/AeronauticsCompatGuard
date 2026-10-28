@@ -31,7 +31,7 @@ public final class InventoryTransaction {
                         && value.state() == CompatibilityServerState.ReservationState.RESERVED)
                 .findFirst()
                 .orElse(null);
-        if (reservation == null || amount > reservation.amount()) {
+        if (reservation == null || amount != reservation.amount()) {
             return offered;
         }
 
@@ -42,12 +42,26 @@ public final class InventoryTransaction {
             return offered;
         }
 
-        state.markInFlight(requestId);
-        ItemStack remainder = ItemHandlerHelper.insertItemStacked(handler, candidate, false);
-        int committed = amount - remainder.getCount();
-        if (!state.settleInFlight(requestId, itemId, committed)) {
+        if (!state.beginInFlight(requestId, itemId, amount)) {
             return offered;
         }
+        ItemStack remainder;
+        try {
+            remainder = ItemHandlerHelper.insertItemStacked(handler, candidate, false);
+        } catch (RuntimeException error) {
+            state.recordQuarantine(
+                    "inventory_transaction",
+                    requestId.toString(),
+                    "unknown",
+                    "handler threw after transaction intent was persisted; request was not replayed",
+                    "item=" + itemId + ", acceptedPlanned=" + simulatedAccepted
+                            + ", offered=" + offered + ", failure=" + error);
+            ItemStack safeRemainder = simulatedRemainder.copy();
+            safeRemainder.grow(offered.getCount() - amount);
+            return safeRemainder;
+        }
+        int committed = amount - remainder.getCount();
+        state.settleInFlight(requestId, itemId, committed);
 
         int remainderOffered = offered.getCount() - amount;
         ItemStack result = remainder.copy();

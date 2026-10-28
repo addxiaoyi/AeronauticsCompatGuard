@@ -37,7 +37,8 @@ public abstract class InvalidItemStackParseMixin {
                 "item_stack",
                 compound.getString("id"),
                 "unknown",
-                "invalid item stack rejected at ItemStack.parse");
+                "invalid item stack rejected at ItemStack.parse",
+                compound.toString());
         callback.setReturnValue(Optional.empty());
     }
 
@@ -58,4 +59,5 @@ public abstract class InvalidItemStackParseMixin {
             return false;
         }
     }
+
 }
