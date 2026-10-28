@@ -13,6 +13,10 @@ The current tested target matrix is Minecraft 1.21.1 / NeoForge 21.1.250, MineCo
 
 The first server fix addresses stale MineColonies item-handler references. It does not yet add a Create-to-colony request bridge, fluid transfer, persistent stock reservations, chunk tickets, or TPS scheduling controls. Those need separate server-side designs and world tests before they should be enabled by default.
 
+The server state layer now provides a persistent request reservation ledger, bounded per-tick work queue, startup world metadata manifest, quarantine event log, server-thread rejection counter, and slow-tick counter. Startup manifests are metadata markers only; a full world backup must still be created by the server operator before automatic cleanup.
+
+The `/acg status`, `/acg compatibility`, and `/acg cleanup-report` commands require permission level 2. Reservation state is stored in `aeronauticscompatguard/reservations.json`; quarantine records are appended to `aeronauticscompatguard/quarantine/events.jsonl`.
+
 ## Build
 
 ```powershell

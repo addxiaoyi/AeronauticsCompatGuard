@@ -6,7 +6,8 @@
   "mixins": [
     "MineColoniesWarehouseHandlerMixin",
     "CraterLibConfigRegistrationMixin",
-    "RemovedEntityPairingMixin"
+    "RemovedEntityPairingMixin",
+    "InvalidItemStackParseMixin"
   ],
   "injectors": {
     "defaultRequire": 0

@@ -15,6 +15,7 @@ public final class CompatibilityPatchRegistry {
     public static final String SABLE_IRIS_VEIL_BOOL_UNIFORMS = "sable.iris.veil.bool_uniforms";
     public static final String CRATERLIB_CONFIG_IDEMPOTENCY = "craterlib.simplerpc.config_idempotency";
     public static final String MINECRAFT_REMOVED_ENTITY_TRACKER = "minecraft.removed_entity_tracker";
+    public static final String MINECRAFT_INVALID_ITEM_STACK = "minecraft.invalid_item_stack";
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<String, Boolean> ACTIVATION = new ConcurrentHashMap<>();
@@ -56,7 +57,16 @@ public final class CompatibilityPatchRegistry {
                             "sendPairingData",
                             List.of(
                                     "net.minecraft.server.level.ServerPlayer",
-                                    "java.util.function.Consumer")))
+                                    "java.util.function.Consumer")),
+                    new Adapter(
+                            MINECRAFT_INVALID_ITEM_STACK,
+                            "invalid item stack quarantine",
+                            List.of(),
+                            "net.minecraft.world.item.ItemStack",
+                            "parse",
+                            List.of(
+                                    "net.minecraft.core.HolderLookup$Provider",
+                                    "net.minecraft.nbt.Tag")))
             .stream()
             .collect(Collectors.toUnmodifiableMap(Adapter::id, adapter -> adapter));
 
