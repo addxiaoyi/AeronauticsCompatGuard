@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 public final class CompatibilityPatchRegistry {
     public static final String MINECOLONIES_CREATE_HANDLER = "minecolonies.create.handler_refresh";
     public static final String SABLE_IRIS_VEIL_BOOL_UNIFORMS = "sable.iris.veil.bool_uniforms";
+    public static final String CRATERLIB_CONFIG_IDEMPOTENCY = "craterlib.simplerpc.config_idempotency";
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<String, Boolean> ACTIVATION = new ConcurrentHashMap<>();
@@ -36,7 +37,16 @@ public final class CompatibilityPatchRegistry {
                                     new ModRequirement("veil", Set.of("4.3.2"))),
                             "net.minecraft.client.renderer.ShaderInstance",
                             "updateLocations",
-                            List.of()))
+                            List.of()),
+                    new Adapter(
+                            CRATERLIB_CONFIG_IDEMPOTENCY,
+                            "SimpleRPC duplicate config registration",
+                            List.of(
+                                    new ModRequirement("craterlib", Set.of("3.1.3")),
+                                    new ModRequirement("simplerpc", Set.of("4.1.4"))),
+                            "com.hypherionmc.craterlib.core.config.ConfigController",
+                            "register_config",
+                            List.of("com.hypherionmc.craterlib.core.config.AbstractConfig")))
             .stream()
             .collect(Collectors.toUnmodifiableMap(Adapter::id, adapter -> adapter));
 
