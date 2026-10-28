@@ -1,10 +1,12 @@
 package dev.aeronautics.compatguard.server.mixin;
 
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
+import dev.aeronautics.compatguard.AeronauticsCompatGuard;
 import dev.aeronautics.compatguard.compat.CompatibilityPatchRegistry;
 import dev.aeronautics.compatguard.server.MineColoniesHandlerAccess;
 import dev.aeronautics.compatguard.server.StableItemHandler;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.neoforge.items.IItemHandler;
@@ -17,6 +19,7 @@ import org.spongepowered.asm.mixin.injection.At;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Pseudo
 @Mixin(targets = "com.minecolonies.core.tileentities.TileEntityColonyBuilding", remap = false)
@@ -24,6 +27,10 @@ public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesH
     @Unique
     private static final ThreadLocal<Boolean> AERONAUTICS_COMPATGUARD_RESOLVING =
             ThreadLocal.withInitial(() -> false);
+
+    @Unique
+    private static final AtomicBoolean AERONAUTICS_COMPATGUARD_THREAD_WARNING_LOGGED =
+            new AtomicBoolean();
 
     @Unique
     private final Map<Direction, IItemHandler> aeronauticsCompatGuard$stableHandlers =
@@ -64,6 +71,15 @@ public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesH
                 || level == null
                 || level.isClientSide
                 || !level.hasChunkAt(blockEntity.getBlockPos())) {
+            return null;
+        }
+        if (!(level instanceof ServerLevel serverLevel)
+                || !serverLevel.getServer().isSameThread()) {
+            if (AERONAUTICS_COMPATGUARD_THREAD_WARNING_LOGGED.compareAndSet(false, true)) {
+                AeronauticsCompatGuard.LOGGER.warn(
+                        "[CompatGuard] Rejected off-thread access to a MineColonies inventory; "
+                                + "the caller must retry on the server thread");
+            }
             return null;
         }
 
