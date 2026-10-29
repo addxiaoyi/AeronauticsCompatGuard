@@ -8,6 +8,7 @@
     "CraterLibConfigRegistrationMixin",
     "RemovedEntityPairingMixin",
     "RidingMovementCorrectionMixin",
+    "LootTableParseGuardMixin",
     "InvalidItemStackParseMixin",
     "UnknownEntityDataMixin",
     "UnknownAttachmentDataMixin"

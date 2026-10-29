@@ -18,6 +18,7 @@ public final class CompatibilityPatchRegistry {
     public static final String MINECRAFT_UNKNOWN_ENTITY_DATA = "minecraft.unknown_entity_data";
     public static final String NEOFORGE_UNKNOWN_ATTACHMENT = "neoforge.unknown_attachment";
     public static final String MINECRAFT_RIDING_MOVEMENT_CORRECTION = "minecraft.riding_movement_correction";
+    public static final String LOOT_TABLE_PARSE_GUARD = "minecraft.loot_table_parse_guard";
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<String, Boolean> ACTIVATION = new ConcurrentHashMap<>();
@@ -79,6 +80,15 @@ public final class CompatibilityPatchRegistry {
                                     "net.minecraft.nbt.CompoundTag",
                                     "net.minecraft.world.level.Level",
                                     "java.util.function.Function")),
+                    new Adapter(
+                            LOOT_TABLE_PARSE_GUARD,
+                            "loot table parse guard",
+                            List.of(),
+                            "net.minecraft.world.level.storage.loot.LootDataType",
+                            "deserialize",
+                            List.of("net.minecraft.resources.ResourceLocation",
+                                    "com.mojang.serialization.DynamicOps",
+                                    "java.lang.Object")),
                     new Adapter(
                             MINECRAFT_RIDING_MOVEMENT_CORRECTION,
                             "server riding movement correction",
