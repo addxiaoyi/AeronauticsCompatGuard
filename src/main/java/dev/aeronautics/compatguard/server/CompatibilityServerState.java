@@ -221,7 +221,7 @@ public final class CompatibilityServerState {
             pendingBlockEntityKeys.remove(dropped.key());
         }
         pendingBlockEntityCleanup.addLast(new PendingBlockEntityCleanup(
-                new WeakReference<>(level), pos.immutable(), id, rawData, key));
+                new WeakReference<>(level), pos.immutable(), id, rawData, key, 0, tick));
     }
 
     public void recordQuarantine(String kind, String id, String location, String reason) {
@@ -814,22 +814,40 @@ public final class CompatibilityServerState {
         int budget = 4;
         while (budget-- > 0 && !pendingBlockEntityCleanup.isEmpty()) {
             PendingBlockEntityCleanup pending = pendingBlockEntityCleanup.removeFirst();
-            pendingBlockEntityKeys.remove(pending.key());
             ServerLevel level = pending.level().get();
-            if (level == null || !level.hasChunkAt(pending.pos())) {
+            if (level == null) {
+                pendingBlockEntityKeys.remove(pending.key());
+                continue;
+            }
+            if (tick < pending.nextAttemptTick()) {
+                pendingBlockEntityCleanup.addLast(pending);
+                continue;
+            }
+            if (!level.hasChunkAt(pending.pos())) {
+                if (ChunkCleanupRetryPolicy.canRetry(pending.attempts())) {
+                    pendingBlockEntityCleanup.addLast(pending.withRetry(
+                            ChunkCleanupRetryPolicy.nextAttemptTick(tick, pending.attempts())));
+                } else {
+                    pendingBlockEntityKeys.remove(pending.key());
+                    recordQuarantine("block_entity", pending.id(), pending.location(level),
+                            "cleanup abandoned after chunk stayed unloaded", pending.rawData());
+                }
                 continue;
             }
             LevelChunk chunk = level.getChunkAt(pending.pos());
             boolean hasSavedEntity = chunk.getBlockEntityNbt(pending.pos()) != null
                     || chunk.getBlockEntities().containsKey(pending.pos());
             if (!level.getBlockState(pending.pos()).isAir() || !hasSavedEntity) {
+                pendingBlockEntityKeys.remove(pending.key());
                 continue;
             }
             if (!snapshotReady) {
+                pendingBlockEntityKeys.remove(pending.key());
                 recordQuarantine("block_entity", pending.id(), pending.location(level),
                         "air block entity retained because startup snapshot is unavailable", pending.rawData());
                 continue;
             }
+            pendingBlockEntityKeys.remove(pending.key());
             recordQuarantine("block_entity", pending.id(), pending.location(level),
                     "block state is air", pending.rawData());
             chunk.removeBlockEntity(pending.pos());
@@ -1271,8 +1289,14 @@ public final class CompatibilityServerState {
             BlockPos pos,
             String id,
             String rawData,
-            String key
+            String key,
+            int attempts,
+            long nextAttemptTick
     ) {
+        private PendingBlockEntityCleanup withRetry(long nextTick) {
+            return new PendingBlockEntityCleanup(level, pos, id, rawData, key, attempts + 1, nextTick);
+        }
+
         private String location(ServerLevel loadedLevel) {
             return loadedLevel.dimension().location() + " " + pos.toShortString();
         }
