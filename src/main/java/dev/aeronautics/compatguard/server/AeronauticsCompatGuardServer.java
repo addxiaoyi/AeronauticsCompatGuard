@@ -27,6 +27,13 @@ public final class AeronauticsCompatGuardServer {
     @SubscribeEvent
     public void onServerStarted(ServerStartedEvent event) {
         CompatibilityServerState.get(event.getServer()).onServerStarted();
+        try {
+            for (String line : dev.aeronautics.compatguard.compat.MixinAudit.report()) {
+                AeronauticsCompatGuard.LOGGER.info("[CompatGuard] mixin audit: {}", line);
+            }
+        } catch (RuntimeException error) {
+            AeronauticsCompatGuard.LOGGER.error("[CompatGuard] Mixin audit aborted; the guard continues", error);
+        }
     }
 
     @SubscribeEvent

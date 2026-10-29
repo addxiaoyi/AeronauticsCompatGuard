@@ -10,6 +10,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -17,8 +18,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.function.Function;
 
 @Pseudo
-@Mixin(value = EntityType.class, remap = false)
+@Mixin(value = EntityType.class, remap = false, priority = 900)
 public abstract class UnknownEntityDataMixin {
+    @Unique
+    private boolean aeronauticsCompatguard$applied;
+
     @Inject(method = "loadEntityRecursive", at = @At("HEAD"), cancellable = true, require = 0)
     private static void aeronauticsCompatGuard$quarantineUnknownEntity(
             CompoundTag tag,

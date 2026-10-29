@@ -20,7 +20,8 @@ public final class CompatibilityCommandRegistrar {
                 .then(Commands.literal("compatibility").executes(context -> compatibility(context.getSource())))
                 .then(Commands.literal("cleanup-report").executes(context -> cleanupReport(context.getSource())))
                 .then(Commands.literal("selftest").executes(context -> selfTest(context.getSource())))
-                .then(Commands.literal("bench").executes(context -> bench(context.getSource()))));
+                .then(Commands.literal("bench").executes(context -> bench(context.getSource())))
+                .then(Commands.literal("mixins").executes(context -> mixins(context.getSource()))));
     }
 
     private static int status(CommandSourceStack source) {
@@ -54,6 +55,13 @@ public final class CompatibilityCommandRegistrar {
             source.sendSuccess(() -> Component.literal("[acg selftest] " + line), false);
         }
         return result.ok() ? 1 : 0;
+    }
+
+    private static int mixins(CommandSourceStack source) {
+        for (String line : dev.aeronautics.compatguard.compat.MixinAudit.report()) {
+            source.sendSuccess(() -> Component.literal("[acg mixins] " + line), false);
+        }
+        return 1;
     }
 
     private static int bench(CommandSourceStack source) {

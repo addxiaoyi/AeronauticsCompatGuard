@@ -24,6 +24,9 @@ import java.util.Map;
  */
 @Mixin(value = ShaderInstance.class, priority = 900)
 public abstract class ShaderInstanceBoolUniformCompatMixin implements Shader {
+    @Unique
+    private boolean aeronauticsCompatguard$applied;
+
     @Shadow
     @Final
     private int programId;

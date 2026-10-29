@@ -19,11 +19,14 @@ import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Pseudo
-@Mixin(targets = "com.hypherionmc.craterlib.core.config.ConfigController", remap = false)
+@Mixin(targets = "com.hypherionmc.craterlib.core.config.ConfigController", remap = false, priority = 900)
 public abstract class CraterLibConfigRegistrationMixin {
     @Shadow
     @Final
     private static HashMap<String, Object> watchedConfigs;
+
+    @Unique
+    private boolean aeronauticsCompatguard$applied;
 
     @Unique
     private static final Logger AERONAUTICS_COMPATGUARD_LOGGER = LogUtils.getLogger();

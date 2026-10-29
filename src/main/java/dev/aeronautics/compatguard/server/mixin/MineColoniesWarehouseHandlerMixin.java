@@ -47,8 +47,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * snapshot.</p>
  */
 @Pseudo
-@Mixin(targets = "com.minecolonies.core.tileentities.TileEntityColonyBuilding", remap = false)
+@Mixin(targets = "com.minecolonies.core.tileentities.TileEntityColonyBuilding", remap = false, priority = 900)
 public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesHandlerAccess {
+    @Unique
+    private boolean aeronauticsCompatguard$applied;
+
     @Unique
     private static final ThreadLocal<Boolean> AERONAUTICS_COMPATGUARD_RESOLVING =
             ThreadLocal.withInitial(() -> false);

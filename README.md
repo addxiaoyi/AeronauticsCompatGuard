@@ -25,6 +25,45 @@ Adapter version gates are tolerant rather than exact-match: `~` allows later pat
 
 On disk load, invalid item stacks and missing `alexsmobs` / `guardvillagers` entity types are quarantined instead of entering the live world. Chunk load also removes block entities whose current block state is air, after recording the location and type. These paths are intentionally limited to loaded save data; they do not cancel normal newly spawned entities.
 
+## Mixin contract and audit
+
+Every mixin ships with an explicit priority, a documented injection point, and a `@Unique` marker
+field so its presence can be verified at runtime. All injectors use `require = 0` (a target signature
+change must not crash the game), which makes a silent miss possible -- the audit is what makes it loud.
+
+| Mixin | Target | Injection | Priority | Why this shape |
+| --- | --- | --- | --- | --- |
+| `MineColoniesWarehouseHandlerMixin` | `com.minecolonies.core.tileentities.TileEntityColonyBuilding` | `@ModifyReturnValue getItemHandlerCap` | 900 | Return-value rewrite composes with other mods; nothing is cancelled |
+| `CraterLibConfigRegistrationMixin` | `com.hypherionmc.craterlib.core.config.ConfigController` | `@Inject HEAD cancellable register_config` | 900 | Must run before the duplicate check to be able to skip it (note: upstream is already idempotent) |
+| `RemovedEntityPairingMixin` | `net.minecraft.server.level.ServerEntity` | `@Inject HEAD cancellable sendPairingData` | 900 | Cancels before other mods append to the packet consumer |
+| `InvalidItemStackParseMixin` | `net.minecraft.world.item.ItemStack` | `@Inject HEAD cancellable parse` | 900 | Rejects a stack before any other mod sees a half-parsed one |
+| `UnknownEntityDataMixin` | `net.minecraft.world.entity.EntityType` | `@Inject HEAD cancellable loadEntityRecursive` | 900 | Stops a bad entity before it reaches the level |
+| `UnknownAttachmentDataMixin` | `net.neoforged.neoforge.attachment.AttachmentHolder` | `@ModifyVariable argsOnly HEAD deserializeAttachments` | 900 | Repairs the tag instead of cancelling, so known attachments still load |
+| `ShaderInstanceBoolUniformCompatMixin` | `net.minecraft.client.renderer.ShaderInstance` | `@Inject TAIL updateLocations` | 900 | Adds missing uniforms after vanilla populated its own |
+
+`/acg mixins` prints the audit; the same table is logged once at server start. Output on
+NeoForge 21.1.250 without the optional mods:
+
+```text
+[acg mixins] minecolonies.create.handler_refresh -> SKIPPED target mod not installed (...)
+[acg mixins] craterlib.simplerpc.config_idempotency -> SKIPPED target mod not installed (...)
+[acg mixins] minecraft.removed_entity_tracker -> APPLIED
+[acg mixins] minecraft.invalid_item_stack -> APPLIED
+[acg mixins] minecraft.unknown_entity_data -> APPLIED
+[acg mixins] neoforge.unknown_attachment -> APPLIED
+[acg mixins] sable.iris.veil.bool_uniforms -> SKIPPED client-only mixin on a dedicated server
+[acg mixins] applied=4 missing=0 declared=7
+```
+
+Two rules that came out of getting this wrong:
+
+- **Never probe a client class to detect the side.** `Class.forName("net.minecraft.client.Minecraft")`
+  on a dedicated server makes RuntimeDistCleaner throw, which aborted `ServerStartedEvent` and took
+  the whole server down. The audit uses `FMLEnvironment.dist` instead, and both the audit and its
+  call site are wrapped so a diagnostic can never crash the game.
+- **`require = 0` needs a companion check.** It is what kept the game alive when
+  `sendPairingData` changed, but it is also why that guard sat inactive without a single log line.
+
 ## Configuration
 
 `config/aeronauticscompatguard-common.toml` (generated on first start):

@@ -8,6 +8,7 @@ import net.neoforged.neoforge.attachment.AttachmentHolder;
 import net.neoforged.neoforge.registries.NeoForgeRegistries;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
@@ -24,8 +25,11 @@ import java.util.List;
  * quarantine manifest.</p>
  */
 @Pseudo
-@Mixin(value = AttachmentHolder.class, remap = false)
+@Mixin(value = AttachmentHolder.class, remap = false, priority = 900)
 public abstract class UnknownAttachmentDataMixin {
+    @Unique
+    private boolean aeronauticsCompatguard$applied;
+
     @ModifyVariable(method = "deserializeAttachments", at = @At("HEAD"), argsOnly = true, require = 0)
     private CompoundTag aeronauticsCompatGuard$stripUnknownAttachments(CompoundTag attachmentData) {
         if (attachmentData == null

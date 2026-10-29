@@ -1,19 +1,12 @@
-Make the guard pay for itself: config gates, O(1) ledger lookup, journal writes
+Audit the mixin layer instead of trusting require = 0
 
-Measured first with /acg bench on a real server, then fixed what the numbers showed:
+Every injector uses require = 0 so a target signature change cannot crash the game, which is
+also how the sendPairingData guard stayed silently inactive on NeoForge 21.1.250. Each mixin now
+carries a @Unique marker field and MixinAudit verifies it on the target class at server start
+and through /acg mixins: 4 APPLIED, 2 skipped because the optional mod is absent, 1 client-only
+skip, missing=0, on a real dedicated server.
 
-- reserve() cost 4433 us/op because every transition rewrote the whole ledger
-  (Gson serialise + atomic move on Windows). It now appends one journal line through a
-  kept-open writer: 50.3 us/op (~88x faster). The snapshot is rebuilt every 256 entries
-  and on shutdown.
-- The transaction hot path copied the entire ledger to find one reservation
-  (reservations() -> List.copyOf). Added CompatibilityServerState#reservation(UUID):
-  12.6 ns/op vs 2391.6 ns/op for the copy at n=200 (~190x), used by InventoryTransaction
-  and FluidTransaction.
-- Entity churn tracking and chunk retention probes now default off behind
-  config/aeronauticscompatguard-common.toml, so a pack installing this for the safety
-  fixes does not pay for diagnostics it never reads.
-- The startup index hash budget is configurable.
-
-Verified: /acg selftest still 11/11, and a seeded journal entry replays into the ledger
-on boot (status reservations=1) then compacts into the snapshot on stop.
+Also: explicit priority 900 on every server mixin so ordering against default-priority mods is
+deterministic, a README table of target/injection/priority/rationale, and two rules learned here:
+never probe a client class to detect the side (RuntimeDistCleaner throws and takes the server
+down), and wrap the audit so a diagnostic cannot crash the game.

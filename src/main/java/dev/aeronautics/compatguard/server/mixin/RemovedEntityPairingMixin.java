@@ -7,6 +7,7 @@ import net.neoforged.neoforge.network.bundle.PacketAndPayloadAcceptor;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -21,8 +22,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * injector silently never applied ({@code require = 0}) and the guard was dead code on this target.</p>
  */
 @Pseudo
-@Mixin(targets = "net.minecraft.server.level.ServerEntity", remap = false)
+@Mixin(targets = "net.minecraft.server.level.ServerEntity", remap = false, priority = 900)
 public abstract class RemovedEntityPairingMixin {
+    @Unique
+    private boolean aeronauticsCompatguard$applied;
+
     @Shadow
     @Final
     private Entity entity;
