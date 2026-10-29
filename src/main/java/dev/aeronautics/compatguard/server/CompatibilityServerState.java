@@ -812,7 +812,11 @@ public final class CompatibilityServerState {
 
     private void processBlockEntityCleanup() {
         int budget = 4;
-        while (budget-- > 0 && !pendingBlockEntityCleanup.isEmpty()) {
+        int inspected = 0;
+        int initialQueueSize = pendingBlockEntityCleanup.size();
+        while (budget-- > 0
+                && inspected++ < initialQueueSize
+                && !pendingBlockEntityCleanup.isEmpty()) {
             PendingBlockEntityCleanup pending = pendingBlockEntityCleanup.removeFirst();
             ServerLevel level = pending.level().get();
             if (level == null) {
