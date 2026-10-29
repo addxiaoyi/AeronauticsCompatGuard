@@ -68,4 +68,80 @@ public final class InventoryTransaction {
         result.grow(remainderOffered);
         return result;
     }
+
+    public static ItemStack extractReserved(
+            CompatibilityServerState state,
+            UUID requestId,
+            String itemId,
+            int amount,
+            IItemHandler handler
+    ) {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(requestId, "requestId");
+        Objects.requireNonNull(handler, "handler");
+        if (amount <= 0 || itemId == null || itemId.isBlank()) {
+            return ItemStack.EMPTY;
+        }
+
+        CompatibilityServerState.Reservation reservation = state.reservations().stream()
+                .filter(value -> value.requestId().equals(requestId)
+                        && value.itemId().equals(itemId)
+                        && value.state() == CompatibilityServerState.ReservationState.RESERVED)
+                .findFirst()
+                .orElse(null);
+        if (reservation == null || amount != reservation.amount()) {
+            return ItemStack.EMPTY;
+        }
+
+        ItemStack simulated = extractMatching(handler, itemId, amount, true);
+        if (simulated.isEmpty() || simulated.getCount() != amount
+                || !state.beginInFlight(requestId, itemId, amount)) {
+            return ItemStack.EMPTY;
+        }
+
+        ItemStack extracted;
+        try {
+            extracted = extractMatching(handler, itemId, amount, false);
+        } catch (RuntimeException error) {
+            state.scheduleRetry(requestId);
+            state.recordQuarantine("inventory_transaction", requestId.toString(), "unknown",
+                    "handler threw during extraction; reservation moved to retry",
+                    "item=" + itemId + ", amount=" + amount + ", failure=" + error);
+            return ItemStack.EMPTY;
+        }
+        if (extracted.isEmpty()) {
+            state.scheduleRetry(requestId);
+            return ItemStack.EMPTY;
+        }
+        if (extracted.getCount() != amount) {
+            state.settleInFlight(requestId, itemId, extracted.getCount());
+            state.scheduleRetry(requestId);
+            return extracted;
+        }
+        state.settleInFlight(requestId, itemId, amount);
+        return extracted;
+    }
+
+    private static ItemStack extractMatching(IItemHandler handler, String itemId, int amount, boolean simulate) {
+        ItemStack extracted = ItemStack.EMPTY;
+        for (int slot = 0; slot < handler.getSlots() && extracted.getCount() < amount; slot++) {
+            ItemStack stack = handler.getStackInSlot(slot);
+            if (stack.isEmpty() || !stack.getItem().builtInRegistryHolder().key().location().toString().equals(itemId)) {
+                continue;
+            }
+            int needed = amount - extracted.getCount();
+            ItemStack part = handler.extractItem(slot, needed, simulate);
+            if (part.isEmpty()) {
+                continue;
+            }
+            if (extracted.isEmpty()) {
+                extracted = part.copy();
+            } else if (ItemHandlerHelper.canItemStacksStack(extracted, part)) {
+                extracted.grow(part.getCount());
+            } else {
+                return ItemStack.EMPTY;
+            }
+        }
+        return extracted;
+    }
 }

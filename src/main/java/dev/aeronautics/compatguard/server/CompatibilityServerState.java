@@ -314,6 +314,24 @@ public final class CompatibilityServerState {
                 && tick >= reservation.nextAttemptTick();
     }
 
+    public boolean claimRetry(UUID requestId) {
+        requireServerThread();
+        Reservation current = reservations.get(requestId);
+        if (current == null || current.state() != ReservationState.RETRY
+                || tick < current.nextAttemptTick()) {
+            return false;
+        }
+        Reservation claimed = new Reservation(
+                current.requestId(), current.itemId(), current.amount(),
+                ReservationState.RESERVED, current.createdAt(), current.retries(), 0L);
+        reservations.put(requestId, claimed);
+        if (saveReservations()) {
+            return true;
+        }
+        reservations.put(requestId, current);
+        return false;
+    }
+
     public void release(UUID requestId) {
         requireServerThread();
         Reservation current = reservations.remove(requestId);
