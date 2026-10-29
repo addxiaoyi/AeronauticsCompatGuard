@@ -51,6 +51,8 @@ public final class CompatibilityServerState {
     public static final int MAX_WORK_PER_TICK = 32;
     public static final int MAX_QUEUED_WORK = 4096;
     public static final int SNAPSHOT_RETENTION = 3;
+    /** Completed request ids remembered so a finished UUID cannot start a second delivery. */
+    public static final int COMPLETION_TOMBSTONES = 4096;
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Gson JSON = new GsonBuilder().disableHtmlEscaping().create();
@@ -67,6 +69,8 @@ public final class CompatibilityServerState {
     private final Map<String, EntityChurn> entityChurn = new HashMap<>();
     private final AtomicBoolean snapshotCreated = new AtomicBoolean();
     private final Map<UUID, Runnable> retryActions = new HashMap<>();
+    private final Deque<UUID> completedRequests = new ArrayDeque<>();
+    private final Set<UUID> completedRequestIds = new HashSet<>();
     private final Set<String> pendingBlockEntityKeys = new HashSet<>();
     private final Set<String> unloadedChunkProbeKeys = new HashSet<>();
     private final ConcurrentLinkedQueue<QuarantineWrite> quarantineOutbox = new ConcurrentLinkedQueue<>();
@@ -324,6 +328,9 @@ public final class CompatibilityServerState {
         if (requestId == null || amount <= 0 || itemId == null || itemId.isBlank()) {
             throw new IllegalArgumentException("Reservation requires a positive amount and item id");
         }
+        if (completedRequestIds.contains(requestId)) {
+            throw new IllegalStateException("Request UUID already completed and must not be reserved again");
+        }
         Reservation current = reservations.get(requestId);
         if (current != null) {
             if (!current.itemId().equals(itemId) || current.amount() != amount) {
@@ -374,6 +381,7 @@ public final class CompatibilityServerState {
         // UUID be reserved again by accident and grows the persisted file without bound.
         reservations.remove(requestId);
         retryActions.remove(requestId);
+        rememberCompletion(requestId);
         if (saveReservations()) {
             deliveredCount++;
             return;
@@ -423,6 +431,30 @@ public final class CompatibilityServerState {
      * instead of capturing an {@code IItemHandler} or {@code IFluidHandler} instance: the chunk may
      * have unloaded and the handler may be stale by the time the backoff expires.</p>
      */
+    /**
+     * Keeps a bounded ring of finished request ids.
+     *
+     * <p>A settled request is removed from the ledger so the persisted file stays small, but that
+     * also erased the only evidence that the UUID was already used. The runtime self test caught
+     * exactly this: after a full settlement the same UUID could reserve again, which is how a
+     * delivered order gets delivered twice. The tombstone ring keeps the duplicate protection while
+     * keeping the ledger bounded.</p>
+     */
+    private void rememberCompletion(UUID requestId) {
+        if (requestId == null || !completedRequestIds.add(requestId)) {
+            return;
+        }
+        completedRequests.addLast(requestId);
+        while (completedRequests.size() > COMPLETION_TOMBSTONES) {
+            UUID evicted = completedRequests.removeFirst();
+            completedRequestIds.remove(evicted);
+        }
+    }
+
+    public int completionTombstones() {
+        return completedRequestIds.size();
+    }
+
     public boolean registerRetryAction(UUID requestId, Runnable action) {
         requireServerThread();
         if (requestId == null || action == null || retryActions.size() >= MAX_QUEUED_WORK) {
@@ -527,6 +559,7 @@ public final class CompatibilityServerState {
         }
         if (accepted == reservation.amount()) {
             reservations.remove(requestId);
+            rememberCompletion(requestId);
         } else {
             reservations.put(requestId, new Reservation(
                     requestId,
@@ -710,6 +743,44 @@ public final class CompatibilityServerState {
             recordQuarantine("block_entity", pending.id(), pending.location(level),
                     "block state is air", pending.rawData());
             chunk.removeBlockEntity(pending.pos());
+        }
+    }
+
+    private void saveCompletedRequests() {
+        Path target = stateFile().resolveSibling("completed.json");
+        Path temporary = target.resolveSibling("completed.json.tmp");
+        try {
+            Files.createDirectories(target.getParent());
+            Files.writeString(temporary,
+                    JSON.toJson(completedRequests.stream().map(UUID::toString).toList()),
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException error) {
+            LOGGER.error("[CompatGuard] Failed to save completed request tombstones", error);
+        }
+    }
+
+    private void loadCompletedRequests() {
+        Path file = stateFile().resolveSibling("completed.json");
+        if (!Files.isRegularFile(file)) {
+            return;
+        }
+        try {
+            String[] ids = JSON.fromJson(Files.readString(file), String[].class);
+            if (ids != null) {
+                for (String id : ids) {
+                    if (id == null) {
+                        continue;
+                    }
+                    try {
+                        rememberCompletion(UUID.fromString(id));
+                    } catch (IllegalArgumentException ignored) {
+                        // A malformed entry is not worth failing startup over.
+                    }
+                }
+            }
+        } catch (IOException | RuntimeException error) {
+            LOGGER.error("[CompatGuard] Failed to load completed request tombstones", error);
         }
     }
 
@@ -901,6 +972,7 @@ public final class CompatibilityServerState {
             if (unresolved > 0 && !saveReservations()) {
                 LOGGER.error("[CompatGuard] Could not persist the recovered reservation ledger");
             }
+            loadCompletedRequests();
         } catch (IOException | RuntimeException error) {
             LOGGER.error("[CompatGuard] Failed to load reservation ledger", error);
         }
@@ -919,6 +991,7 @@ public final class CompatibilityServerState {
             Files.writeString(temporary, JSON.toJson(reservations.values()),
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
             Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            saveCompletedRequests();
             return true;
         } catch (IOException error) {
             LOGGER.error("[CompatGuard] Failed to save reservation ledger", error);

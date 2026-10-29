@@ -18,7 +18,8 @@ public final class CompatibilityCommandRegistrar {
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("status").executes(context -> status(context.getSource())))
                 .then(Commands.literal("compatibility").executes(context -> compatibility(context.getSource())))
-                .then(Commands.literal("cleanup-report").executes(context -> cleanupReport(context.getSource()))));
+                .then(Commands.literal("cleanup-report").executes(context -> cleanupReport(context.getSource())))
+                .then(Commands.literal("selftest").executes(context -> selfTest(context.getSource()))));
     }
 
     private static int status(CommandSourceStack source) {
@@ -43,6 +44,15 @@ public final class CompatibilityCommandRegistrar {
         source.sendSuccess(() -> Component.literal(
                 "Compatibility adapters are version-gated; inspect startup log for enabled/skipped reasons."), false);
         return 1;
+    }
+
+    private static int selfTest(CommandSourceStack source) {
+        CompatibilityServerState state = state(source);
+        InventorySelfTest.Result result = InventorySelfTest.run(state);
+        for (String line : result.lines()) {
+            source.sendSuccess(() -> Component.literal("[acg selftest] " + line), false);
+        }
+        return result.ok() ? 1 : 0;
     }
 
     private static int cleanupReport(CommandSourceStack source) {

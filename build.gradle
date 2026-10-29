@@ -177,6 +177,12 @@ publishing {
     }
 }
 
+// Gradle gives JavaExec an empty stdin by default, so the dedicated server sees EOF on its
+// console reader and stops immediately. Wiring the real stdin keeps `runServer` interactive.
+tasks.withType(JavaExec).configureEach {
+    standardInput = System.in
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
 }

@@ -41,6 +41,42 @@ Every mixin target was checked against the real artefact, not against memory:
 | Create capability caching | `create-1.21.1-6.0.10.jar`: `CapManipulationBehaviourBase#getInventory()` is `return targetCapability`; `tick()` only re-resolves when `findNewNextTick` is set or `getGameTime() % 64 == 0`; the class contains no reference to `invalidateCapabilities` | a cached Create reference points at a discarded combined inventory for up to 64 ticks (3.2s); Create never sees MineColonies' per-tick invalidation, which is why the delegate has to stay valid |
 | `minecolonies TileEntityColonyBuilding#getItemHandlerCap(Direction)` | `raw.githubusercontent.com/ldtteam/minecolonies/version/1.21/src/main/java/com/minecolonies/core/tileentities/TileEntityColonyBuilding.java:616` | present as `public IItemHandler getItemHandlerCap(final Direction side)`; `CombinedItemHandler` is `com.minecolonies.api.inventory.api.CombinedItemHandler implements IItemHandlerModifiable` |
 
+## Runtime verification of the transaction ledger
+
+`/acg selftest` runs the reservation state machine on the live server thread with real registries and
+a real `ItemStackHandler`, so the ledger can be verified without a game client. Output from
+NeoForge 21.1.250:
+
+```text
+[acg selftest] PASS reserve is idempotent
+[acg selftest] PASS partial insert stores what fits
+[acg selftest] PASS partial insert returns the remainder
+[acg selftest] PASS ledger keeps the unaccepted remainder
+[acg selftest] PASS a retry action is queued for the remainder
+[acg selftest] PASS IN_FLIGHT is entered before the handler is touched
+[acg selftest] PASS unknown outcome is parked as SUSPECT
+[acg selftest] PASS SUSPECT is never replayed
+[acg selftest] PASS SUSPECT cannot re-enter IN_FLIGHT
+[acg selftest] PASS settled request is removed from the ledger
+[acg selftest] PASS a completed UUID cannot be reserved again
+[acg selftest] PASS inventory transaction self test (11/11)
+```
+
+The first run of this test **failed** the last assertion: because a fully settled request is removed
+from the ledger, nothing remembered that the UUID had already been used, so the same UUID could
+reserve again -- the exact shape of a double delivery. The fix is a bounded tombstone ring
+(`COMPLETION_TOMBSTONES = 4096`, persisted to `aeronauticscompatguard/completed.json`) that keeps the
+duplicate protection without letting the ledger grow.
+
+Files written under the world root during a real run:
+
+| File | Content |
+| --- | --- |
+| `aeronauticscompatguard/reservations.json` | live ledger (empty array when every request settled) |
+| `aeronauticscompatguard/completed.json` | tombstone ring of finished request UUIDs |
+| `aeronauticscompatguard/quarantine/events.jsonl` | append-only quarantine log with `rawDataSha256` |
+| `aeronauticscompatguard/snapshots/world-*/index.jsonl` | startup integrity index |
+
 ## Runtime verification
 
 `gradlew runServer` was run against NeoForge 21.1.250 (no game client, no optional mods). Observed in the log:
