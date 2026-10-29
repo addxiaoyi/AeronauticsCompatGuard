@@ -48,7 +48,10 @@ public final class CompatibilityPatchRegistry {
                             "SimpleRPC duplicate config registration",
                             List.of(
                                     new ModRequirement("craterlib", "~3.1.3"),
-                                    new ModRequirement("simplerpc", "~4.1.4")),
+                                    // The Modrinth release published as 4.1.4 ships a jar whose
+                                    // neoforge.mods.toml still declares version 4.1.3+release.0,
+                                    // so FML reports 4.1.3 and a "~4.1.4" gate never matched.
+                                    new ModRequirement("simplerpc", "~4.1.3")),
                             "com.hypherionmc.craterlib.core.config.ConfigController",
                             "register_config",
                             List.of("com.hypherionmc.craterlib.core.config.AbstractConfig")),
@@ -133,7 +136,15 @@ public final class CompatibilityPatchRegistry {
                 continue;
             }
             ACTIVATION.put(adapter.id(), false);
-            LOGGER.info("[CompatGuard] Skipped {}: {}", adapter.id(), reason);
+            // A missing optional mod is expected and quiet. A mod that is installed but outside its
+            // tested gate means the guard is silently inactive, which is worth a warning: that is
+            // how the SimpleRPC gate stayed off while the README listed it as tested.
+            if (reason.startsWith("missing mod ")) {
+                LOGGER.info("[CompatGuard] Skipped {}: {}", adapter.id(), reason);
+            } else {
+                LOGGER.warn("[CompatGuard] Skipped {}: {} -- this guard is inactive; "
+                        + "verify the installed version or update the gate", adapter.id(), reason);
+            }
         }
         statusLogged = true;
     }
