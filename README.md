@@ -25,10 +25,25 @@ Adapter version gates are tolerant rather than exact-match: `~` allows later pat
 
 On disk load, invalid item stacks and missing `alexsmobs` / `guardvillagers` entity types are quarantined instead of entering the live world. Chunk load also removes block entities whose current block state is air, after recording the location and type. These paths are intentionally limited to loaded save data; they do not cancel normal newly spawned entities.
 
+## Verified target matrix
+
+Every mixin target was checked against the real artefact, not against memory:
+
+| Target | Evidence | Result |
+| --- | --- | --- |
+| `InventoryTransaction` -> `ItemHandlerHelper` | `javap` on `build/moddev/artifacts/neoforge-21.1.250-merged.jar` | `canItemStacksStack` absent (only `insertItem`, `insertItemStacked`, `giveItemToPlayer`, `calcRedstoneFromInventory`); replaced with `ItemStack.isSameItemSameComponents` |
+| `ServerEntity#sendPairingData` | same jar | real signature `(ServerPlayer, PacketAndPayloadAcceptor)`; the old `java.util.function.Consumer` never matched |
+| `ItemStack#parse`, `EntityType#loadEntityRecursive`, `AttachmentHolder#deserializeAttachments`, `AttachmentType.serializer`, `ShaderInstance#updateLocations` | same jar | present (`updateLocations` is `private void`; `getDeclaredMethod` finds it) |
+| `CraterLib ConfigController#register_config(AbstractConfig)` | `javap` on `CraterLib-Neoforge-1.21-3.1.3.jar` | present; `watchedConfigs` is `HashMap<String, AbstractConfig>` keyed by `config.getConfigPath().toString()` |
+| `create` version gate | `META-INF/neoforge.mods.toml` in `create-1.21.1-6.0.10.jar` | `version = "6.0.10"`, so the gate must not be the `6.0.10+mc1.21.1` release name |
+| `craterlib` version gate | `META-INF/neoforge.mods.toml` in the same jar | `version = "3.1.3"` (the `1.21-3.1.3` form is only the release name) |
+| `minecolonies TileEntityColonyBuilding#getItemHandlerCap(Direction)` | `raw.githubusercontent.com/ldtteam/minecolonies/version/1.21/src/main/java/com/minecolonies/core/tileentities/TileEntityColonyBuilding.java:616` | present as `public IItemHandler getItemHandlerCap(final Direction side)`; `CombinedItemHandler` is `com.minecolonies.api.inventory.api.CombinedItemHandler implements IItemHandlerModifiable` |
+
 ## Known gaps
 
 - MineColonies/Create request and package callbacks are not wired (the mod jars are not compile dependencies); the transaction primitives are not called from mod code paths.
-- Sable/Iris/Veil, CraterLib, MineColonies and Create mixin targets can only be compile-checked here; the classes are resolved at runtime and are gated by `require = 0` plus the adapter registry.
+- The `craterlib.simplerpc.config_idempotency` adapter is log-only: the bytecode of `register_config` already returns early when the config path is registered (`watchedConfigs.containsKey(configPath.toString())` -> error log -> return), so cancelling the injection only silences that message. It does not fix a live defect on 3.1.3.
+- MineColonies/Create are not present in this environment as files, so their classes were checked from source and metadata rather than from the installed jar.
 - No in-game verification: there is no test instance, so runtime behaviour (mixin application, retention, transaction settlement under a live server) is unproven.
 
 ## Build
