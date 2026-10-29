@@ -34,8 +34,9 @@ public abstract class UnknownEntityDataMixin {
 
         String id = tag.getString("id");
         ResourceLocation location = ResourceLocation.tryParse(id);
+        // Namespace is not a proxy for "still exists": a vanilla id can be removed between versions
+        // (or be a datapack-removed entry), and those were previously rethrown straight into the load.
         if (location == null
-                || "minecraft".equals(location.getNamespace())
                 || net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.containsKey(location)) {
             return;
         }
