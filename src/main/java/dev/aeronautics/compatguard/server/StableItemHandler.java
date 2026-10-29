@@ -6,11 +6,29 @@ import net.neoforged.neoforge.items.IItemHandlerModifiable;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+/**
+ * Delegate whose target is resolved on every call.
+ *
+ * <p>Same shape as Create's {@code com.simibubi.create.foundation.item.ItemHandlerWrapper}, except
+ * that Create's wrapper stores a fixed {@code IItemHandlerModifiable} and therefore cannot survive a
+ * target that MineColonies recreates every tick. Contract notes taken from
+ * {@code CombinedItemHandler}: an out-of-range insert returns the offered stack unchanged, an
+ * out-of-range extract returns {@link ItemStack#EMPTY}, and slot counts are computed per call --
+ * they are never cached here, because the underlying container list changes at runtime.</p>
+ */
 public final class StableItemHandler implements IItemHandlerModifiable {
     private final Supplier<IItemHandlerModifiable> currentHandler;
 
     public StableItemHandler(Supplier<IItemHandlerModifiable> currentHandler) {
         this.currentHandler = Objects.requireNonNull(currentHandler, "currentHandler");
+    }
+
+    @Override
+    public String toString() {
+        IItemHandlerModifiable handler = currentHandler.get();
+        return handler == null
+                ? "StableItemHandler[unresolved]"
+                : "StableItemHandler[" + handler.getClass().getName() + "#slots=" + handler.getSlots() + "]";
     }
 
     /** True when the backing handler is still reachable; false means the endpoint is gone. */

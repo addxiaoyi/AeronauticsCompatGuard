@@ -17,10 +17,35 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Returns one stable delegate instead of MineColonies' per-tick combined inventory.
+ *
+ * <p>Upstream behaviour this depends on (checked against
+ * {@code ldtteam/minecolonies}, branch {@code version/1.21}):</p>
+ *
+ * <ul>
+ *   <li>{@code TileEntityColonyBuilding#tick()} rebuilds the combined inventory every tick:
+ *       {@code if (combinedInv != null) { invalidateCapabilities(); combinedInv = null; }}</li>
+ *   <li>{@code TileEntityColonyBuilding#getItemHandlerCap(Direction side)} <em>ignores</em>
+ *       {@code side}, lazily builds {@code new CombinedItemHandler(...)} and caches it in one field,
+ *       so every side shares a single instance -- a per-{@link Direction} wrapper cache here would
+ *       store up to six identical delegates for one handler.</li>
+ *   <li>{@code CombinedItemHandler} holds {@code private final IItemHandlerModifiable[] handlers},
+ *       so a retained instance keeps the container array it was built with.</li>
+ *   <li>Create 6.0.10 {@code CapManipulationBehaviourBase} caches the resolved capability in
+ *       {@code targetCapability} and only re-resolves on {@code initialize()},
+ *       {@code onNeighborChanged(...)} or every 64 game ticks
+ *       ({@code getGameTime() % 64 == 0} in {@code tick()}); it never subscribes to
+ *       {@code invalidateCapabilities()}. A cached Create reference therefore points at a
+ *       combined inventory MineColonies discarded up to 64 ticks (3.2s) earlier.</li>
+ * </ul>
+ *
+ * <p>This wrapper resolves the current handler on every call, so the object Create cached stays
+ * valid; when the block entity dies the wrapper reports zero slots instead of serving the stale
+ * snapshot.</p>
+ */
 @Pseudo
 @Mixin(targets = "com.minecolonies.core.tileentities.TileEntityColonyBuilding", remap = false)
 public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesHandlerAccess {
@@ -37,8 +62,7 @@ public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesH
             new AtomicBoolean();
 
     @Unique
-    private final Map<Direction, IItemHandler> aeronauticsCompatGuard$stableHandlers =
-            new ConcurrentHashMap<>();
+    private volatile IItemHandler aeronauticsCompatGuard$stableHandler;
 
     @ModifyReturnValue(method = "getItemHandlerCap", at = @At("RETURN"), require = 0)
     private IItemHandler aeronauticsCompatGuard$refreshWarehouseHandler(
@@ -60,22 +84,31 @@ public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesH
             return original;
         }
 
-        return aeronauticsCompatGuard$stableHandlers.computeIfAbsent(
-                side,
-                ignored -> new StableItemHandler(
-                        () -> {
-                            IItemHandler raw = aeronauticsCompatGuard$getRawHandler(side);
-                            if (raw instanceof IItemHandlerModifiable modifiable) {
-                                return modifiable;
-                            }
-                            if (raw == null && AERONAUTICS_COMPATGUARD_ENDPOINT_WARNING.compareAndSet(false, true)) {
-                                AeronauticsCompatGuard.LOGGER.info(
-                                        "[CompatGuard] A retained MineColonies inventory wrapper lost its endpoint "
-                                                + "(block entity removed, chunk unloaded, or off-thread access); "
-                                                + "the wrapper now reports zero slots so pipes stop rather than read stale state");
-                            }
-                            return null;
-                        }));
+        IItemHandler cached = aeronauticsCompatGuard$stableHandler;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (this) {
+            if (aeronauticsCompatGuard$stableHandler == null) {
+                aeronauticsCompatGuard$stableHandler = new StableItemHandler(this::aeronauticsCompatGuard$resolveCurrent);
+            }
+            return aeronauticsCompatGuard$stableHandler;
+        }
+    }
+
+    @Unique
+    private IItemHandlerModifiable aeronauticsCompatGuard$resolveCurrent() {
+        IItemHandler raw = aeronauticsCompatGuard$getRawHandler(null);
+        if (raw instanceof IItemHandlerModifiable modifiable) {
+            return modifiable;
+        }
+        if (raw == null && AERONAUTICS_COMPATGUARD_ENDPOINT_WARNING.compareAndSet(false, true)) {
+            AeronauticsCompatGuard.LOGGER.info(
+                    "[CompatGuard] A retained MineColonies inventory wrapper lost its endpoint "
+                            + "(block entity removed, chunk unloaded, or off-thread access); "
+                            + "the wrapper now reports zero slots so pipes stop rather than read stale state");
+        }
+        return null;
     }
 
     @Override
