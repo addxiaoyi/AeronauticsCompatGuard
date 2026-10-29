@@ -30,6 +30,11 @@ public final class CompatibilityCommandRegistrar {
                         + " quarantined=" + status.quarantined()
                         + " offThreadRejected=" + status.rejectedOffThread()
                         + " slowTicks=" + status.slowTicks()
+                        + " lastTickMs=" + (status.lastTickNanos() / 1_000_000L)
+                        + " suspects=" + status.suspects()
+                        + " delivered=" + status.delivered()
+                        + " pendingRetries=" + status.pendingRetries()
+                        + " queuedQuarantineEvents=" + status.queuedQuarantine()
                         + " trackedUnloadedChunks=" + status.trackedUnloadedChunks()), false);
         return 1;
     }

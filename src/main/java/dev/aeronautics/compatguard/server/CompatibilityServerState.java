@@ -26,6 +26,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
@@ -37,7 +38,13 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.lang.ref.WeakReference;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.StreamSupport;
 
 public final class CompatibilityServerState {
@@ -59,11 +66,19 @@ public final class CompatibilityServerState {
     private final Map<UUID, EntityProbe> trackedEntities = new HashMap<>();
     private final Map<String, EntityChurn> entityChurn = new HashMap<>();
     private final AtomicBoolean snapshotCreated = new AtomicBoolean();
+    private final Map<UUID, Runnable> retryActions = new HashMap<>();
+    private final Set<String> pendingBlockEntityKeys = new HashSet<>();
+    private final Set<String> unloadedChunkProbeKeys = new HashSet<>();
+    private final ConcurrentLinkedQueue<QuarantineWrite> quarantineOutbox = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger quarantineOutboxSize = new AtomicInteger();
+    private final AtomicBoolean quarantineFlushPending = new AtomicBoolean();
+    private long deliveredCount;
     private long tick;
     private long rejectedOffThread;
     private long quarantineCount;
     private long completedWork;
     private long lastTickNanos;
+    private long lastTickDurationNanos;
     private long tickStartNanos;
     private long slowTicks;
     private volatile boolean snapshotReady;
@@ -117,8 +132,11 @@ public final class CompatibilityServerState {
 
     public void onServerStopped() {
         saveReservations();
+        flushQuarantineOutbox();
         work.clear();
         pendingBlockEntityCleanup.clear();
+        pendingBlockEntityKeys.clear();
+        retryActions.clear();
     }
 
     public void tick() {
@@ -137,7 +155,8 @@ public final class CompatibilityServerState {
             }
         }
         lastTickNanos = System.nanoTime();
-        if (tickStartNanos != 0L && lastTickNanos - tickStartNanos > 50_000_000L) {
+        lastTickDurationNanos = tickStartNanos == 0L ? 0L : lastTickNanos - tickStartNanos;
+        if (lastTickDurationNanos > 50_000_000L) {
             slowTicks++;
         }
         if (tick % 1200L == 0L) {
@@ -145,6 +164,7 @@ public final class CompatibilityServerState {
             reportEntityChurn();
         }
         processBlockEntityCleanup();
+        runDueRetries();
     }
 
     public void beginTick() {
@@ -154,6 +174,13 @@ public final class CompatibilityServerState {
     public void enqueue(Runnable task) {
         if (server.isSameThread()) {
             enqueueOnServer(task);
+            return;
+        }
+        // Bound the queue before submitting: otherwise an off-thread flood allocates an unbounded
+        // number of Runnable captures on the server executor before the size check can run.
+        if (work.size() >= MAX_QUEUED_WORK) {
+            rejectedOffThread++;
+            LOGGER.warn("[CompatGuard] Work queue full; deferred compatibility operation rejected off-thread");
             return;
         }
         rejectedOffThread++;
@@ -171,11 +198,18 @@ public final class CompatibilityServerState {
 
     public void queueAirBlockEntityCleanup(ServerLevel level, BlockPos pos, String id, String rawData) {
         requireServerThread();
+        // Chunk reloads re-report the same block entities; without dedupe the queue fills with
+        // duplicate scans of one position and the recorded "air block entity" events multiply.
+        String key = level.dimension().location() + "|" + pos.asLong();
+        if (!pendingBlockEntityKeys.add(key)) {
+            return;
+        }
         if (pendingBlockEntityCleanup.size() >= 4096) {
-            pendingBlockEntityCleanup.removeFirst();
+            PendingBlockEntityCleanup dropped = pendingBlockEntityCleanup.removeFirst();
+            pendingBlockEntityKeys.remove(dropped.key());
         }
         pendingBlockEntityCleanup.addLast(new PendingBlockEntityCleanup(
-                new WeakReference<>(level), pos.immutable(), id, rawData));
+                new WeakReference<>(level), pos.immutable(), id, rawData, key));
     }
 
     public void recordQuarantine(String kind, String id, String location, String reason) {
@@ -193,29 +227,85 @@ public final class CompatibilityServerState {
         Path dir = server.getWorldPath(LevelResource.ROOT)
                 .resolve("aeronauticscompatguard")
                 .resolve("quarantine");
+        Path manifest = dir.resolve("events.jsonl");
+        String source = rawData == null ? "" : rawData;
+        int retainedLength = Math.min(source.length(), MAX_QUARANTINE_RAW_CHARS);
+        String retained = source.substring(0, retainedLength);
+        Map<String, Object> record = new HashMap<>();
+        record.put("time", Instant.now().toString());
+        record.put("kind", kind);
+        record.put("id", id);
+        record.put("location", location);
+        record.put("reason", reason);
+        record.put("rawData", retained);
+        record.put("rawDataTruncated", retainedLength < source.length());
+        record.put("rawDataSha256", sha256(source));
+        String json = JSON.toJson(record);
+        // The append is moved off the server thread: one Files.createDirectories + writeString per
+        // event on the tick thread is a straight-line slow-tick source during migration storms.
+        if (quarantineOutboxSize.incrementAndGet() > MAX_QUARANTINE_OUTBOX) {
+            quarantineOutboxSize.decrementAndGet();
+            LOGGER.warn("[CompatGuard] Quarantine outbox full; dropping event {}/{}", kind, id);
+            return;
+        }
+        quarantineOutbox.add(new QuarantineWrite(manifest, json));
+        scheduleQuarantineFlush();
+    }
+
+    private void scheduleQuarantineFlush() {
+        if (quarantineFlushPending.compareAndSet(false, true)) {
+            QUARANTINE_WRITER.execute(this::flushQuarantineBatch);
+        }
+    }
+
+    private void flushQuarantineBatch() {
+        int budget = MAX_QUARANTINE_WRITES_PER_FLUSH;
         try {
-            Files.createDirectories(dir);
-            Path manifest = dir.resolve("events.jsonl");
-            String source = rawData == null ? "" : rawData;
-            int retainedLength = Math.min(source.length(), MAX_QUARANTINE_RAW_CHARS);
-            String retained = source.substring(0, retainedLength);
-            Map<String, Object> record = new HashMap<>();
-            record.put("time", Instant.now().toString());
-            record.put("kind", kind);
-            record.put("id", id);
-            record.put("location", location);
-            record.put("reason", reason);
-            record.put("rawData", retained);
-            record.put("rawDataTruncated", retainedLength < source.length());
-            record.put("rawDataSha256", sha256(source));
-            String json = JSON.toJson(record);
-            Files.writeString(manifest, json + System.lineSeparator(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            while (budget-- > 0) {
+                QuarantineWrite write = quarantineOutbox.poll();
+                if (write == null) {
+                    return;
+                }
+                quarantineOutboxSize.decrementAndGet();
+                appendQuarantineLine(write);
+            }
+        } finally {
+            quarantineFlushPending.set(false);
+            if (!quarantineOutbox.isEmpty()) {
+                scheduleQuarantineFlush();
+            }
+        }
+    }
+
+    private void flushQuarantineOutbox() {
+        QuarantineWrite write;
+        while ((write = quarantineOutbox.poll()) != null) {
+            quarantineOutboxSize.decrementAndGet();
+            appendQuarantineLine(write);
+        }
+    }
+
+    private static void appendQuarantineLine(QuarantineWrite write) {
+        try {
+            Files.createDirectories(write.manifest().getParent());
+            Files.writeString(write.manifest(), write.json() + System.lineSeparator(),
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException error) {
             LOGGER.error("[CompatGuard] Failed to write quarantine event", error);
         }
     }
 
+    private record QuarantineWrite(Path manifest, String json) {}
+
     private static final int MAX_QUARANTINE_RAW_CHARS = 262_144;
+    private static final int MAX_QUARANTINE_OUTBOX = 4096;
+    private static final int MAX_QUARANTINE_WRITES_PER_FLUSH = 256;
+    private static final int MAX_RETRIES_PER_TICK = 8;
+    private static final ExecutorService QUARANTINE_WRITER = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "CompatGuard-QuarantineWriter");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private static String sha256(String value) {
         try {
@@ -238,6 +328,10 @@ public final class CompatibilityServerState {
         if (current != null) {
             if (!current.itemId().equals(itemId) || current.amount() != amount) {
                 throw new IllegalStateException("Request UUID was reused for a different item reservation");
+            }
+            if (current.state() != ReservationState.RESERVED && current.state() != ReservationState.RETRY) {
+                throw new IllegalStateException(
+                        "Request UUID was reused after the reservation reached " + current.state());
             }
             return current;
         }
@@ -276,9 +370,90 @@ public final class CompatibilityServerState {
         if (current == null) {
             return;
         }
-        updateReservation(requestId, ReservationState.DELIVERED, 0);
+        // A delivered request must not stay in the ledger: a retained DELIVERED entry lets the same
+        // UUID be reserved again by accident and grows the persisted file without bound.
+        reservations.remove(requestId);
+        retryActions.remove(requestId);
+        if (saveReservations()) {
+            deliveredCount++;
+            return;
+        }
+        reservations.put(requestId, current);
+    }
+
+    /**
+     * Parks a reservation whose commit outcome is unknown (handler threw, ledger write failed).
+     * SUSPECT is terminal for automatic machinery: it is never replayed, retried, or settled, so an
+     * unknown outcome cannot turn into duplicated items. It is surfaced through {@code /acg status}.
+     */
+    public boolean markSuspect(UUID requestId, String itemId, String reason, String rawData) {
+        requireServerThread();
+        Reservation current = reservations.get(requestId);
+        if (current == null) {
+            recordQuarantine("inventory_transaction", requestId.toString(), "unknown", reason, rawData);
+            return false;
+        }
+        reservations.put(requestId, new Reservation(
+                current.requestId(), current.itemId(), current.amount(), ReservationState.SUSPECT,
+                current.createdAt(), current.retries(), 0L));
+        retryActions.remove(requestId);
         if (!saveReservations()) {
-            reservations.put(requestId, current);
+            LOGGER.error("[CompatGuard] Could not persist SUSPECT reservation {}; state is memory-only", requestId);
+        }
+        recordQuarantine("inventory_transaction", requestId.toString(), "unknown", reason, rawData);
+        return true;
+    }
+
+    public boolean releaseSuspect(UUID requestId) {
+        requireServerThread();
+        Reservation current = reservations.get(requestId);
+        if (current == null || current.state() != ReservationState.SUSPECT) {
+            return false;
+        }
+        reservations.put(requestId, new Reservation(
+                current.requestId(), current.itemId(), current.amount(), ReservationState.RESERVED,
+                current.createdAt(), current.retries(), 0L));
+        return saveReservations();
+    }
+
+    /**
+     * Registers the deferred work that finishes a partially committed request.
+     *
+     * <p>The action must re-resolve its endpoint when it runs (block entity lookup, chunk check)
+     * instead of capturing an {@code IItemHandler} or {@code IFluidHandler} instance: the chunk may
+     * have unloaded and the handler may be stale by the time the backoff expires.</p>
+     */
+    public boolean registerRetryAction(UUID requestId, Runnable action) {
+        requireServerThread();
+        if (requestId == null || action == null || retryActions.size() >= MAX_QUEUED_WORK) {
+            return false;
+        }
+        retryActions.put(requestId, action);
+        return true;
+    }
+
+    private void runDueRetries() {
+        if (retryActions.isEmpty()) {
+            return;
+        }
+        int budget = MAX_RETRIES_PER_TICK;
+        var iterator = retryActions.entrySet().iterator();
+        while (iterator.hasNext() && budget-- > 0) {
+            Map.Entry<UUID, Runnable> entry = iterator.next();
+            UUID requestId = entry.getKey();
+            if (!reservations.containsKey(requestId)) {
+                iterator.remove();
+                continue;
+            }
+            if (!retryReady(requestId) || !claimRetry(requestId)) {
+                continue;
+            }
+            try {
+                entry.getValue().run();
+            } catch (RuntimeException error) {
+                LOGGER.error("[CompatGuard] Deferred inventory retry failed for {}", requestId, error);
+            }
+            iterator.remove();
         }
     }
 
@@ -372,6 +547,9 @@ public final class CompatibilityServerState {
     }
 
     public Status status() {
+        long suspects = reservations.values().stream()
+                .filter(value -> value.state() == ReservationState.SUSPECT)
+                .count();
         return new Status(
                 tick,
                 work.size(),
@@ -379,18 +557,28 @@ public final class CompatibilityServerState {
                 quarantineCount,
                 completedWork,
                 rejectedOffThread,
-                lastTickNanos,
+                lastTickDurationNanos,
                 slowTicks,
-                unloadedChunkProbes.size());
+                unloadedChunkProbes.size(),
+                suspects,
+                deliveredCount,
+                retryActions.size(),
+                quarantineOutboxSize.get());
     }
 
     public void onChunkUnloaded(ServerLevel level, ChunkAccess chunk) {
         requireServerThread();
-        if (unloadedChunkProbes.size() >= 4096) {
-            unloadedChunkProbes.removeFirst();
-        }
         ChunkPos pos = chunk.getPos();
+        String key = level.dimension().location() + "|" + pos.toLong();
+        if (!unloadedChunkProbeKeys.add(key)) {
+            return;
+        }
+        if (unloadedChunkProbes.size() >= 4096) {
+            UnloadedChunkProbe dropped = unloadedChunkProbes.removeFirst();
+            unloadedChunkProbeKeys.remove(dropped.key());
+        }
         unloadedChunkProbes.addLast(new UnloadedChunkProbe(
+                key,
                 new WeakReference<>(chunk),
                 level.dimension().location().toString(),
                 pos.x,
@@ -449,6 +637,7 @@ public final class CompatibilityServerState {
                 continue;
             }
             if (probe.chunk().get() == null) {
+                unloadedChunkProbeKeys.remove(probe.key());
                 iterator.remove();
                 continue;
             }
@@ -478,7 +667,13 @@ public final class CompatibilityServerState {
     }
 
     private void pruneTrackedEntities() {
-        trackedEntities.entrySet().removeIf(entry -> entry.getValue().entity().get() == null);
+        // Dropping only null weak references kept one entry per player for the whole session: a
+        // player who logged out has a removed (but still collectable-later) entity object, and the
+        // probe map never shrank below its high-water mark.
+        trackedEntities.entrySet().removeIf(entry -> {
+            Entity tracked = entry.getValue().entity().get();
+            return tracked == null || tracked.isRemoved();
+        });
     }
 
     private void flushPrestartQuarantine() {
@@ -496,6 +691,7 @@ public final class CompatibilityServerState {
         int budget = 4;
         while (budget-- > 0 && !pendingBlockEntityCleanup.isEmpty()) {
             PendingBlockEntityCleanup pending = pendingBlockEntityCleanup.removeFirst();
+            pendingBlockEntityKeys.remove(pending.key());
             ServerLevel level = pending.level().get();
             if (level == null || !level.hasChunkAt(pending.pos())) {
                 continue;
@@ -552,26 +748,41 @@ public final class CompatibilityServerState {
                 return;
             }
             Files.createDirectories(staging);
-            Files.walkFileTree(worldRoot, new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes)
-                        throws IOException {
-                    if (directory.equals(guardRoot)) {
-                        return FileVisitResult.SKIP_SUBTREE;
+            // Previously this copied the whole world root three times over. That stalls server start
+            // on multi-gigabyte worlds and triples disk usage for a guard whose job is auditing. The
+            // snapshot keeps the same gate (snapshotReady) but stores an integrity index instead of a
+            // duplicate world: path, size, mtime and a hash for the small critical files.
+            Path indexPath = staging.resolve("index.jsonl");
+            try (var writer = Files.newBufferedWriter(indexPath, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                List<String> lines = new ArrayList<>();
+                Files.walkFileTree(worldRoot, new SimpleFileVisitor<>() {
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                        if (directory.equals(guardRoot)) {
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
+                        return FileVisitResult.CONTINUE;
                     }
-                    Files.createDirectories(staging.resolve(worldRoot.relativize(directory)));
-                    return FileVisitResult.CONTINUE;
-                }
 
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes)
-                        throws IOException {
-                    Path target = staging.resolve(worldRoot.relativize(file));
-                    Files.createDirectories(target.getParent());
-                    Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
-                    return FileVisitResult.CONTINUE;
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                        Map<String, Object> entry = new HashMap<>();
+                        entry.put("path", worldRoot.relativize(file).toString().replace('\\', '/'));
+                        entry.put("size", attributes.size());
+                        entry.put("modified", attributes.lastModifiedTime().toMillis());
+                        if (attributes.size() <= MAX_HASHED_SNAPSHOT_FILE_BYTES) {
+                            entry.put("sha256", sha256File(file));
+                        }
+                        lines.add(JSON.toJson(entry));
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+                for (String line : lines) {
+                    writer.write(line);
+                    writer.write(System.lineSeparator());
                 }
-            });
+            }
             String name = "startup-" + Instant.now().toString().replace(':', '-') + ".json";
             Map<String, Object> manifest = new HashMap<>();
             manifest.put("createdAt", Instant.now().toString());
@@ -580,7 +791,8 @@ public final class CompatibilityServerState {
             manifest.put("dimensions", StreamSupport.stream(server.getAllLevels().spliterator(), false)
                     .map(level -> level.dimension().location().toString()).sorted().toList());
             manifest.put("players", server.getPlayerList().getPlayerCount());
-            manifest.put("snapshotType", "full-world-root-copy");
+            manifest.put("snapshotType", "integrity-index");
+            manifest.put("indexFile", "index.jsonl");
             Files.writeString(staging.resolve("snapshot.json"), JSON.toJson(manifest));
             String stamp = name.substring("startup-".length(), name.length() - ".json".length());
             Path complete = snapshots.resolve("world-" + stamp);
@@ -601,6 +813,22 @@ public final class CompatibilityServerState {
         } catch (IOException error) {
             LOGGER.error("[CompatGuard] Could not create full rolling world snapshot", error);
             deleteTree(staging);
+        }
+    }
+
+    private static final long MAX_HASHED_SNAPSHOT_FILE_BYTES = 8L * 1024L * 1024L;
+
+    private static String sha256File(Path file) {
+        try (var input = Files.newInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) > 0) {
+                digest.update(buffer, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (IOException | NoSuchAlgorithmException error) {
+            return "unavailable:" + error.getClass().getSimpleName();
         }
     }
 
@@ -642,22 +870,46 @@ public final class CompatibilityServerState {
             int unresolved = 0;
             if (saved != null) {
                 for (Reservation reservation : saved) {
-                    if (reservation != null && reservation.requestId() != null) {
-                        reservations.put(reservation.requestId(), reservation);
-                        if (reservation.state() == ReservationState.IN_FLIGHT) {
-                            unresolved++;
-                        }
+                    if (reservation == null || reservation.requestId() == null || reservation.state() == null) {
+                        continue;
                     }
+                    if (reservation.state() == ReservationState.IN_FLIGHT) {
+                        // The process died mid-transaction: the commit outcome is unknown. Parking the
+                        // entry in SUSPECT keeps it visible and non-replayable. Leaving it IN_FLIGHT
+                        // made it unreachable, because settleInFlight/beginInFlight both require a
+                        // different state, so such a request could never finish or be released.
+                        reservations.put(reservation.requestId(), new Reservation(
+                                reservation.requestId(), reservation.itemId(), reservation.amount(),
+                                ReservationState.SUSPECT, reservation.createdAt(),
+                                reservation.retries(), 0L));
+                        unresolved++;
+                        continue;
+                    }
+                    if (reservation.state() == ReservationState.CANCELLED) {
+                        continue;
+                    }
+                    reservations.put(reservation.requestId(), new Reservation(
+                            reservation.requestId(), reservation.itemId(), reservation.amount(),
+                            reservation.state(), reservation.createdAt(), reservation.retries(),
+                            reservation.state() == ReservationState.RETRY ? tick + retryDelay(reservation.retries()) : 0L));
                 }
             }
             if (unresolved > 0) {
                 LOGGER.error("[CompatGuard] {} inventory transactions were in-flight at shutdown; "
-                        + "automatic replay is disabled to avoid item duplication", unresolved);
+                        + "they are parked as SUSPECT for operator reconciliation instead of being replayed", unresolved);
+            }
+            if (unresolved > 0 && !saveReservations()) {
+                LOGGER.error("[CompatGuard] Could not persist the recovered reservation ledger");
             }
         } catch (IOException | RuntimeException error) {
             LOGGER.error("[CompatGuard] Failed to load reservation ledger", error);
         }
     }
+
+    private static long retryDelay(int retries) {
+        return Math.min(1200L, 20L << Math.max(0, Math.min(6, retries)));
+    }
+
 
     private boolean saveReservations() {
         Path target = stateFile();
@@ -679,7 +931,7 @@ public final class CompatibilityServerState {
         }
     }
 
-    public enum ReservationState { PENDING, RESERVED, IN_FLIGHT, DELIVERED, RETRY, CANCELLED }
+    public enum ReservationState { PENDING, RESERVED, IN_FLIGHT, DELIVERED, RETRY, CANCELLED, SUSPECT }
 
     public record Reservation(
             UUID requestId,
@@ -692,9 +944,11 @@ public final class CompatibilityServerState {
     ) {}
 
     public record Status(long tick, int queuedWork, int reservations, long quarantined, long completedWork,
-                         long rejectedOffThread, long lastTickNanos, long slowTicks, int trackedUnloadedChunks) {}
+                         long rejectedOffThread, long lastTickNanos, long slowTicks, int trackedUnloadedChunks,
+                         long suspects, long delivered, int pendingRetries, int queuedQuarantine) {}
 
     private record UnloadedChunkProbe(
+            String key,
             WeakReference<ChunkAccess> chunk,
             String dimension,
             int x,
@@ -723,7 +977,8 @@ public final class CompatibilityServerState {
             WeakReference<ServerLevel> level,
             BlockPos pos,
             String id,
-            String rawData
+            String rawData,
+            String key
     ) {
         private String location(ServerLevel loadedLevel) {
             return loadedLevel.dimension().location() + " " + pos.toShortString();

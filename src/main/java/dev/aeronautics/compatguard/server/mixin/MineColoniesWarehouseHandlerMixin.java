@@ -17,8 +17,8 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Pseudo
@@ -33,8 +33,12 @@ public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesH
             new AtomicBoolean();
 
     @Unique
+    private static final AtomicBoolean AERONAUTICS_COMPATGUARD_ENDPOINT_WARNING =
+            new AtomicBoolean();
+
+    @Unique
     private final Map<Direction, IItemHandler> aeronauticsCompatGuard$stableHandlers =
-            new HashMap<>();
+            new ConcurrentHashMap<>();
 
     @ModifyReturnValue(method = "getItemHandlerCap", at = @At("RETURN"), require = 0)
     private IItemHandler aeronauticsCompatGuard$refreshWarehouseHandler(
@@ -59,8 +63,19 @@ public abstract class MineColoniesWarehouseHandlerMixin implements MineColoniesH
         return aeronauticsCompatGuard$stableHandlers.computeIfAbsent(
                 side,
                 ignored -> new StableItemHandler(
-                        () -> aeronauticsCompatGuard$getRawHandler(side)
-                                instanceof IItemHandlerModifiable modifiable ? modifiable : null));
+                        () -> {
+                            IItemHandler raw = aeronauticsCompatGuard$getRawHandler(side);
+                            if (raw instanceof IItemHandlerModifiable modifiable) {
+                                return modifiable;
+                            }
+                            if (raw == null && AERONAUTICS_COMPATGUARD_ENDPOINT_WARNING.compareAndSet(false, true)) {
+                                AeronauticsCompatGuard.LOGGER.info(
+                                        "[CompatGuard] A retained MineColonies inventory wrapper lost its endpoint "
+                                                + "(block entity removed, chunk unloaded, or off-thread access); "
+                                                + "the wrapper now reports zero slots so pipes stop rather than read stale state");
+                            }
+                            return null;
+                        }));
     }
 
     @Override

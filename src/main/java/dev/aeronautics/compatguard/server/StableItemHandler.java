@@ -13,6 +13,11 @@ public final class StableItemHandler implements IItemHandlerModifiable {
         this.currentHandler = Objects.requireNonNull(currentHandler, "currentHandler");
     }
 
+    /** True when the backing handler is still reachable; false means the endpoint is gone. */
+    public boolean isEndpointAlive() {
+        return currentHandler.get() != null;
+    }
+
     @Override
     public int getSlots() {
         IItemHandlerModifiable handler = currentHandler.get();

@@ -18,6 +18,26 @@ public final class InventoryTransaction {
             IItemHandler handler,
             ItemStack offered
     ) {
+        return insertReserved(state, requestId, itemId, amount, handler, offered, null);
+    }
+
+    /**
+     * Inserts {@code amount} items that are already covered by a server-side reservation.
+     *
+     * <p>Contract: exactly-once. The ledger is moved to {@code IN_FLIGHT} before the handler is
+     * touched and is settled afterwards. When the handler throws after the intent was persisted the
+     * real commit result is unknown; the reservation is parked in {@code SUSPECT} instead of being
+     * silently retried, because replaying an unknown outcome duplicates items.</p>
+     */
+    public static ItemStack insertReserved(
+            CompatibilityServerState state,
+            UUID requestId,
+            String itemId,
+            int amount,
+            IItemHandler handler,
+            ItemStack offered,
+            Runnable retryAction
+    ) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(requestId, "requestId");
         Objects.requireNonNull(handler, "handler");
@@ -49,11 +69,9 @@ public final class InventoryTransaction {
         try {
             remainder = ItemHandlerHelper.insertItemStacked(handler, candidate, false);
         } catch (RuntimeException error) {
-            state.recordQuarantine(
-                    "inventory_transaction",
-                    requestId.toString(),
-                    "unknown",
-                    "handler threw after transaction intent was persisted; request was not replayed",
+            // Commit result is unknown: park the reservation so no automatic replay can duplicate items.
+            state.markSuspect(requestId, itemId,
+                    "handler threw after transaction intent was persisted; commit result unknown",
                     "item=" + itemId + ", acceptedPlanned=" + simulatedAccepted
                             + ", offered=" + offered + ", failure=" + error);
             ItemStack safeRemainder = simulatedRemainder.copy();
@@ -61,7 +79,14 @@ public final class InventoryTransaction {
             return safeRemainder;
         }
         int committed = amount - remainder.getCount();
-        state.settleInFlight(requestId, itemId, committed);
+        if (!state.settleInFlight(requestId, itemId, committed)) {
+            state.markSuspect(requestId, itemId,
+                    "ledger settle failed after insertion; commit result diverged from the ledger",
+                    "item=" + itemId + ", committed=" + committed + ", remainder=" + remainder);
+        }
+        if (committed < amount && retryAction != null) {
+            state.registerRetryAction(requestId, retryAction);
+        }
 
         int remainderOffered = offered.getCount() - amount;
         ItemStack result = remainder.copy();
@@ -75,6 +100,17 @@ public final class InventoryTransaction {
             String itemId,
             int amount,
             IItemHandler handler
+    ) {
+        return extractReserved(state, requestId, itemId, amount, handler, null);
+    }
+
+    public static ItemStack extractReserved(
+            CompatibilityServerState state,
+            UUID requestId,
+            String itemId,
+            int amount,
+            IItemHandler handler,
+            Runnable retryAction
     ) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(requestId, "requestId");
@@ -103,22 +139,32 @@ public final class InventoryTransaction {
         try {
             extracted = extractMatching(handler, itemId, amount, false);
         } catch (RuntimeException error) {
-            state.scheduleRetry(requestId);
-            state.recordQuarantine("inventory_transaction", requestId.toString(), "unknown",
-                    "handler threw during extraction; reservation moved to retry",
+            state.markSuspect(requestId, itemId,
+                    "handler threw during extraction; commit result unknown",
                     "item=" + itemId + ", amount=" + amount + ", failure=" + error);
             return ItemStack.EMPTY;
         }
         if (extracted.isEmpty()) {
+            // Execute returned nothing: no commit happened, so the request can be retried safely.
             state.scheduleRetry(requestId);
+            if (retryAction != null) {
+                state.registerRetryAction(requestId, retryAction);
+            }
             return ItemStack.EMPTY;
         }
         if (extracted.getCount() != amount) {
             state.settleInFlight(requestId, itemId, extracted.getCount());
             state.scheduleRetry(requestId);
+            if (retryAction != null) {
+                state.registerRetryAction(requestId, retryAction);
+            }
             return extracted;
         }
-        state.settleInFlight(requestId, itemId, amount);
+        if (!state.settleInFlight(requestId, itemId, amount)) {
+            state.markSuspect(requestId, itemId,
+                    "ledger settle failed after extraction; commit result diverged from the ledger",
+                    "item=" + itemId + ", extracted=" + extracted);
+        }
         return extracted;
     }
 
@@ -136,7 +182,7 @@ public final class InventoryTransaction {
             }
             if (extracted.isEmpty()) {
                 extracted = part.copy();
-            } else if (ItemHandlerHelper.canItemStacksStack(extracted, part)) {
+            } else if (ItemStack.isSameItemSameComponents(extracted, part)) {
                 extracted.grow(part.getCount());
             } else {
                 return ItemStack.EMPTY;
