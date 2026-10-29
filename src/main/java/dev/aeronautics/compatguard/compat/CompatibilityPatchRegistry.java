@@ -6,7 +6,6 @@ import org.slf4j.Logger;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -27,8 +26,8 @@ public final class CompatibilityPatchRegistry {
                             MINECOLONIES_CREATE_HANDLER,
                             "server inventory capability refresh",
                             List.of(
-                                    new ModRequirement("minecolonies", Set.of("1.1.1405-1.21.1-snapshot")),
-                                    new ModRequirement("create", Set.of("6.0.10"))),
+                                    new ModRequirement("minecolonies", "~1.1.1405"),
+                                    new ModRequirement("create", "~6.0.10")),
                             "com.minecolonies.core.tileentities.TileEntityColonyBuilding",
                             "getItemHandlerCap",
                             List.of("net.minecraft.core.Direction")),
@@ -36,9 +35,9 @@ public final class CompatibilityPatchRegistry {
                             SABLE_IRIS_VEIL_BOOL_UNIFORMS,
                             "client shader boolean uniforms",
                             List.of(
-                                    new ModRequirement("sable", Set.of("2.0.5")),
-                                    new ModRequirement("iris", Set.of("1.8.14-beta.1+mc1.21.1")),
-                                    new ModRequirement("veil", Set.of("4.3.2"))),
+                                    new ModRequirement("sable", "~2.0.5"),
+                                    new ModRequirement("iris", "~1.8.14"),
+                                    new ModRequirement("veil", "~4.3.2")),
                             "net.minecraft.client.renderer.ShaderInstance",
                             "updateLocations",
                             List.of()),
@@ -46,8 +45,8 @@ public final class CompatibilityPatchRegistry {
                             CRATERLIB_CONFIG_IDEMPOTENCY,
                             "SimpleRPC duplicate config registration",
                             List.of(
-                                    new ModRequirement("craterlib", Set.of("3.1.3")),
-                                    new ModRequirement("simplerpc", Set.of("4.1.4"))),
+                                    new ModRequirement("craterlib", "~3.1.3"),
+                                    new ModRequirement("simplerpc", "~4.1.4")),
                             "com.hypherionmc.craterlib.core.config.ConfigController",
                             "register_config",
                             List.of("com.hypherionmc.craterlib.core.config.AbstractConfig")),
@@ -59,7 +58,7 @@ public final class CompatibilityPatchRegistry {
                             "sendPairingData",
                             List.of(
                                     "net.minecraft.server.level.ServerPlayer",
-                                    "java.util.function.Consumer")),
+                                    "net.neoforged.neoforge.network.bundle.PacketAndPayloadAcceptor")),
                     new Adapter(
                             MINECRAFT_INVALID_ITEM_STACK,
                             "invalid item stack quarantine",
@@ -131,8 +130,9 @@ public final class CompatibilityPatchRegistry {
             if (currentVersion == null) {
                 return "missing mod " + requirement.modId();
             }
-            if (!requirement.testedVersions().contains(currentVersion)) {
-                return "untested version " + requirement.modId() + " " + currentVersion;
+            if (!requirement.spec().matches(currentVersion)) {
+                return "untested version " + requirement.modId() + " " + currentVersion
+                        + " (gate " + requirement.spec() + ")";
             }
         }
 
@@ -177,7 +177,11 @@ public final class CompatibilityPatchRegistry {
                 .orElse(null);
     }
 
-    private record ModRequirement(String modId, Set<String> testedVersions) {}
+    private record ModRequirement(String modId, VersionSpec spec) {
+        private ModRequirement(String modId, String spec) {
+            this(modId, VersionSpec.parse(spec));
+        }
+    }
 
     private record Adapter(
             String id,
