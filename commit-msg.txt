@@ -1,12 +1,15 @@
-Turn the shipped server log into leak attribution
+Fix the moved-too-quickly snap-back for riding players
 
-The supplied log (1663 lines) is dominated by one vanilla warning: 800 of 821 WARN lines are
-'Fetching packet for removed entity ItemEntity[...]' (8 entities x 99 repeats), which fires from
-ServerEntity#sendPairingData -- the exact method RemovedEntityPairingMixin cancels at HEAD. The
-bytecode confirms vanilla logs isRemoved() and then still builds the add-entity packet and pairing
-data, so the guard removes real work rather than just noise.
+The supplied log had one 'moved too quickly' line. Its bytecode branch in handleMovePlayer ends
+in teleport(player.getX(), getY(), getZ(), yRot, xRot) followed by return, so the server snaps the
+player back and drops the rest of the movement packet. RidingMovementCorrectionMixin redirects that
+single teleport call and skips it when the player is a passenger; handleMoveVehicle still validates
+the vehicle's own movement.
 
-The same log shows AllTheLeaks retaining 32 ServerPlayer and 2276 LevelChunk objects at +1098MB.
-A retained ServerPlayer keeps its ServerLevel and therefore its chunks, so /acg leaks now reports
-logged-out players that are still strongly reachable next to the unloaded-chunk probes. Nothing is
-freed: attribution only, because this mod cannot free what another mod holds.
+Runtime verified: /acg mixins reports minecraft.riding_movement_correction -> APPLIED
+(applied=5 missing=0 declared=8), /acg selftest still 11/11, no exceptions in the boot log.
+
+The log's other signals are documented rather than 'fixed': the 800 removed-entity warnings are
+already covered by RemovedEntityPairingMixin (bytecode shows vanilla sends after logging), and the
+AllTheLeaks retention (32 ServerPlayer / 2276 LevelChunk / +1098MB) is attributed by /acg leaks but
+not freed, because this mod cannot free what another mod holds.

@@ -38,6 +38,7 @@ change must not crash the game), which makes a silent miss possible -- the audit
 | `RemovedEntityPairingMixin` | `net.minecraft.server.level.ServerEntity` | `@Inject HEAD cancellable sendPairingData` | 900 | Cancels before other mods append to the packet consumer |
 | `InvalidItemStackParseMixin` | `net.minecraft.world.item.ItemStack` | `@Inject HEAD cancellable parse` | 900 | Rejects a stack before any other mod sees a half-parsed one |
 | `UnknownEntityDataMixin` | `net.minecraft.world.entity.EntityType` | `@Inject HEAD cancellable loadEntityRecursive` | 900 | Stops a bad entity before it reaches the level |
+| `RidingMovementCorrectionMixin` | `net.minecraft.server.network.ServerGamePacketListenerImpl` | `@Redirect teleport(DDDFF) handleMovePlayer` | 900 | Skips the "moved too quickly" snap-back only while the player is a passenger; the vehicle still owns and validates its own movement |
 | `UnknownAttachmentDataMixin` | `net.neoforged.neoforge.attachment.AttachmentHolder` | `@ModifyVariable argsOnly HEAD deserializeAttachments` | 900 | Repairs the tag instead of cancelling, so known attachments still load |
 | `ShaderInstanceBoolUniformCompatMixin` | `net.minecraft.client.renderer.ShaderInstance` | `@Inject TAIL updateLocations` | 900 | Adds missing uniforms after vanilla populated its own |
 
@@ -94,6 +95,29 @@ classes) and a development environment simply does not expose third-party mixins
 by a 13-assertion harness over `ConflictMatcher` (pure Java, no game instance): before/same/after
 ordering, class-level overlaps with no declared injection, and exclusion of a different method or a
 different target class.
+
+## What a real server log showed
+
+A 1663-line log from a modded dedicated server contained 821 WARN lines, **800 of them the same
+message**: `Fetching packet for removed entity ItemEntity['Infested Stone'/...]` (8 entities, 99
+repeats each). Disassembling `ServerEntity#sendPairingData` shows the warning is followed by real
+work, not an early return:
+
+```text
+ 0: entity.isRemoved()        ifeq 25
+10: LOGGER.warn("Fetching packet for removed entity {}")
+25: entity.getAddEntityPacket(this) -> acceptor.accept(...)
+51: entity.sendPairingData(player, consumer)
+```
+
+`RemovedEntityPairingMixin` cancels at `HEAD`, so both the add-entity packet and the pairing data are
+skipped for an entity that is already removed.
+
+The same log also produced one `ling_you_ moved too quickly! 130.43,10.5,-38.48`. In
+`handleMovePlayer` that branch ends in `teleport(player.getX(), getY(), getZ(), yRot, xRot)` followed by
+`return`, so the server snaps the player back and discards the rest of the packet.
+`RidingMovementCorrectionMixin` redirects that single `teleport` call and skips it while the player is
+a passenger.
 
 ## Leak attribution (`/acg leaks`)
 

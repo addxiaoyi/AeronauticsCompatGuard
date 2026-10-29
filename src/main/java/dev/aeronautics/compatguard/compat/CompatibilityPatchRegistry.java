@@ -17,6 +17,7 @@ public final class CompatibilityPatchRegistry {
     public static final String MINECRAFT_INVALID_ITEM_STACK = "minecraft.invalid_item_stack";
     public static final String MINECRAFT_UNKNOWN_ENTITY_DATA = "minecraft.unknown_entity_data";
     public static final String NEOFORGE_UNKNOWN_ATTACHMENT = "neoforge.unknown_attachment";
+    public static final String MINECRAFT_RIDING_MOVEMENT_CORRECTION = "minecraft.riding_movement_correction";
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<String, Boolean> ACTIVATION = new ConcurrentHashMap<>();
@@ -78,6 +79,13 @@ public final class CompatibilityPatchRegistry {
                                     "net.minecraft.nbt.CompoundTag",
                                     "net.minecraft.world.level.Level",
                                     "java.util.function.Function")),
+                    new Adapter(
+                            MINECRAFT_RIDING_MOVEMENT_CORRECTION,
+                            "server riding movement correction",
+                            List.of(),
+                            "net.minecraft.server.network.ServerGamePacketListenerImpl",
+                            "handleMovePlayer",
+                            List.of("net.minecraft.network.protocol.game.ServerboundMovePlayerPacket")),
                     new Adapter(
                             NEOFORGE_UNKNOWN_ATTACHMENT,
                             "unknown data attachment quarantine",

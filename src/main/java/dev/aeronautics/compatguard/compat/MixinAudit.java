@@ -55,6 +55,8 @@ public final class MixinAudit {
                     "net.minecraft.world.item.ItemStack", "parse", Side.BOTH),
             new Entry("minecraft.unknown_entity_data",
                     "net.minecraft.world.entity.EntityType", "loadEntityRecursive", Side.BOTH),
+            new Entry("minecraft.riding_movement_correction",
+                    "net.minecraft.server.network.ServerGamePacketListenerImpl", "handleMovePlayer", Side.BOTH),
             new Entry("neoforge.unknown_attachment",
                     "net.neoforged.neoforge.attachment.AttachmentHolder", "deserializeAttachments", Side.BOTH),
             new Entry("sable.iris.veil.bool_uniforms",
