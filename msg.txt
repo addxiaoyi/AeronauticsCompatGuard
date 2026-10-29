@@ -1,14 +1,18 @@
-0.1.3: stop substituting the shared LootTable.EMPTY (it crashed datapack load)
+Register AttachmentTypeSerializerAccessor: players could not log in
 
-A server log showed the mod's own guard aborting startup:
-  Failed to load datapacks, can't proceed with server load
-  java.lang.IllegalStateException: Adding duplicate value
-  'net.minecraft.world.level.storage.loot.LootTable@2a1d9270' to registry
-  at net.minecraft.server.ReloadableServerRegistries.lambda$scheduleElementParse$2
+A real server crashed on player join with:
+  IllegalClassLoadError: Illegal classload request for accessor mixin
+  dev.aeronautics.compatguard.server.mixin.AttachmentTypeSerializerAccessor. The mixin is missing
+  from aeronauticscompatguard.mixins.json which owns package
+  dev.aeronautics.compatguard.server.mixin.* and the mixin has not been applied.
+  at AttachmentHolder.localvar$enj000$aeronauticscompatguard$aeronauticsCompatGuard$stripUnknownAttachments
+  at AttachmentHolder.deserializeAttachments -> Entity.load -> PlayerList.placeNewPlayer
+ending in 'lost connection: Invalid player data' and 'Couldn't place player in world'.
 
-Cause: javap on LootDataType shows TABLE's defaultValue is the shared LootTable.EMPTY
-singleton (getstatic LootTable.EMPTY). The guard returned that same instance for every table that
-failed to parse, so two failures registered one object twice and MappedRegistry rejected it.
+UnknownAttachmentDataMixin casts to AttachmentTypeSerializerAccessor, but that accessor was never
+listed in aeronauticscompatguard.mixins.json, so Mixin refuses to load it and the cast fails on the
+first entity that carries attachments -- i.e. every joining player.
 
-The guard now only records the failure and returns the original empty Optional, so a broken id
-stays absent exactly like vanilla. Recorded in the quarantine manifest either way.
+Fixed by adding the accessor to the mixins array. Verified on NeoForge 21.1.250: the log now shows
+'Mixing AttachmentTypeSerializerAccessor ... into net.neoforged.neoforge.attachment.AttachmentType'
+and /acg mixins still reports applied=6 missing=0.

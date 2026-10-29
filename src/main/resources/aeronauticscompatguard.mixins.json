@@ -11,7 +11,8 @@
     "LootTableParseGuardMixin",
     "InvalidItemStackParseMixin",
     "UnknownEntityDataMixin",
-    "UnknownAttachmentDataMixin"
+    "UnknownAttachmentDataMixin",
+    "AttachmentTypeSerializerAccessor"
   ],
   "injectors": {
     "defaultRequire": 0
