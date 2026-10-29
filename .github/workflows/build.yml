@@ -27,6 +27,9 @@ jobs:
       - name: Build
         run: ./gradlew build --console=plain
 
+      - name: Verify mixin manifests
+        run: python3 scripts/verify_mixin_manifests.py --jar-dir build/libs
+
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
