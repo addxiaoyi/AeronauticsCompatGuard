@@ -45,13 +45,11 @@ public final class InventoryTransaction {
             return offered == null ? ItemStack.EMPTY : offered;
         }
 
-        CompatibilityServerState.Reservation reservation = state.reservations().stream()
-                .filter(value -> value.requestId().equals(requestId)
-                        && value.itemId().equals(itemId)
-                        && value.state() == CompatibilityServerState.ReservationState.RESERVED)
-                .findFirst()
-                .orElse(null);
-        if (reservation == null || amount != reservation.amount()) {
+        CompatibilityServerState.Reservation reservation = state.reservation(requestId);
+        if (reservation == null
+                || reservation.state() != CompatibilityServerState.ReservationState.RESERVED
+                || !reservation.itemId().equals(itemId)
+                || amount != reservation.amount()) {
             return offered;
         }
 
@@ -119,13 +117,11 @@ public final class InventoryTransaction {
             return ItemStack.EMPTY;
         }
 
-        CompatibilityServerState.Reservation reservation = state.reservations().stream()
-                .filter(value -> value.requestId().equals(requestId)
-                        && value.itemId().equals(itemId)
-                        && value.state() == CompatibilityServerState.ReservationState.RESERVED)
-                .findFirst()
-                .orElse(null);
-        if (reservation == null || amount != reservation.amount()) {
+        CompatibilityServerState.Reservation reservation = state.reservation(requestId);
+        if (reservation == null
+                || reservation.state() != CompatibilityServerState.ReservationState.RESERVED
+                || !reservation.itemId().equals(itemId)
+                || amount != reservation.amount()) {
             return ItemStack.EMPTY;
         }
 

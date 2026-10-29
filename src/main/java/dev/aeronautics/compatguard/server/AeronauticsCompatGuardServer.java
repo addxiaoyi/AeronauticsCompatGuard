@@ -67,6 +67,10 @@ public final class AeronauticsCompatGuardServer {
         if (!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel level)) {
             return;
         }
+        if (!dev.aeronautics.compatguard.CompatGuardConfig.flag(
+                dev.aeronautics.compatguard.CompatGuardConfig.AIR_BLOCK_ENTITY_SCAN, true)) {
+            return;
+        }
         CompatibilityServerState state = CompatibilityServerState.get(level.getServer());
         for (BlockPos pos : event.getChunk().getBlockEntitiesPos()) {
             if (!level.getBlockState(pos).isAir()) {

@@ -157,10 +157,11 @@ public final class FluidTransaction {
             String fluidId,
             int amount
     ) {
-        return state.reservations().stream().anyMatch(value -> value.requestId().equals(requestId)
-                && value.itemId().equals(fluidId)
-                && value.amount() == amount
-                && value.state() == CompatibilityServerState.ReservationState.RESERVED);
+        CompatibilityServerState.Reservation reservation = state.reservation(requestId);
+        return reservation != null
+                && reservation.itemId().equals(fluidId)
+                && reservation.amount() == amount
+                && reservation.state() == CompatibilityServerState.ReservationState.RESERVED;
     }
 
     private static FluidStack firstMatchingTank(IFluidHandler handler, String fluidId, int amount) {

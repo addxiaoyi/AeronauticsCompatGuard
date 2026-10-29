@@ -1,0 +1,19 @@
+Make the guard pay for itself: config gates, O(1) ledger lookup, journal writes
+
+Measured first with /acg bench on a real server, then fixed what the numbers showed:
+
+- reserve() cost 4433 us/op because every transition rewrote the whole ledger
+  (Gson serialise + atomic move on Windows). It now appends one journal line through a
+  kept-open writer: 50.3 us/op (~88x faster). The snapshot is rebuilt every 256 entries
+  and on shutdown.
+- The transaction hot path copied the entire ledger to find one reservation
+  (reservations() -> List.copyOf). Added CompatibilityServerState#reservation(UUID):
+  12.6 ns/op vs 2391.6 ns/op for the copy at n=200 (~190x), used by InventoryTransaction
+  and FluidTransaction.
+- Entity churn tracking and chunk retention probes now default off behind
+  config/aeronauticscompatguard-common.toml, so a pack installing this for the safety
+  fixes does not pay for diagnostics it never reads.
+- The startup index hash budget is configurable.
+
+Verified: /acg selftest still 11/11, and a seeded journal entry replays into the ledger
+on boot (status reservations=1) then compacts into the snapshot on stop.

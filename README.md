@@ -25,6 +25,45 @@ Adapter version gates are tolerant rather than exact-match: `~` allows later pat
 
 On disk load, invalid item stacks and missing `alexsmobs` / `guardvillagers` entity types are quarantined instead of entering the live world. Chunk load also removes block entities whose current block state is air, after recording the location and type. These paths are intentionally limited to loaded save data; they do not cancel normal newly spawned entities.
 
+## Configuration
+
+`config/aeronauticscompatguard-common.toml` (generated on first start):
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `diagnostics.entityChurnTracking` | `false` | Per-entity join/leave probes and the 1200-tick churn report. Costs one probe record per entity join. |
+| `diagnostics.chunkRetentionProbes` | `false` | Weak reference per unloaded chunk to detect retained chunk objects (bounded to 4096). |
+| `safety.airBlockEntityScan` | `true` | On chunk load, queue block entities whose block state is air. Costs one `getBlockState` per block entity position. |
+| `safety.startupIntegrityIndex` | `true` | Write the startup integrity index. When off, automatic air block entity cleanup stays disabled (no baseline). |
+| `safety.startupIndexMaxHashedBytes` | `8388608` | Files above this size are indexed by size/mtime only. |
+| `transactions.enabled` | `true` | Reservation-backed item and fluid primitives. |
+
+The diagnostics paths default to **off** because a pack that installs this mod for the safety fixes
+should not pay for observability it never reads.
+
+## Measured cost (`/acg bench`, NeoForge 21.1.250, Windows 11, JDK 21)
+
+| Measurement | Value |
+| --- | --- |
+| `tick()` | 373.6 ns/op |
+| `status()` | 262.5 ns/op |
+| `reservation()` miss | 19.5 ns/op |
+| `reservation()` hit @ n=200 | 12.6 ns/op |
+| `reservations()` full copy @ n=200 | 2391.6 ns/op |
+| `reserve()` | 50.3 µs/op |
+
+## Ledger persistence
+
+State is an append-only journal (`aeronauticscompatguard/reservations.journal`, one line per
+transition, kept-open writer + flush) that is folded into the atomic snapshot
+(`aeronauticscompatguard/reservations.json`) every 256 entries and on shutdown. On load the snapshot
+is read first and the journal replayed on top of it; a journal without a snapshot is replayed too, so
+a crash after the first append does not lose the request.
+
+Verified by seeding a journal with one `RESERVED` entry and starting the server:
+`/acg status` reported `reservations=1`, and after `stop` the snapshot held that entry while the
+journal file was gone.
+
 ## Verified target matrix
 
 Every mixin target was checked against the real artefact, not against memory:
