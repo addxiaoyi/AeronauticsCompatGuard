@@ -39,6 +39,29 @@ Every mixin target was checked against the real artefact, not against memory:
 | `craterlib` version gate | `META-INF/neoforge.mods.toml` in the same jar | `version = "3.1.3"` (the `1.21-3.1.3` form is only the release name) |
 | `minecolonies TileEntityColonyBuilding#getItemHandlerCap(Direction)` | `raw.githubusercontent.com/ldtteam/minecolonies/version/1.21/src/main/java/com/minecolonies/core/tileentities/TileEntityColonyBuilding.java:616` | present as `public IItemHandler getItemHandlerCap(final Direction side)`; `CombinedItemHandler` is `com.minecolonies.api.inventory.api.CombinedItemHandler implements IItemHandlerModifiable` |
 
+## Runtime verification
+
+`gradlew runServer` was run against NeoForge 21.1.250 (no game client, no optional mods). Observed in the log:
+
+```text
+[modloading-worker-0/INFO] Aeronautics Compat Guard initialized
+[mixin/]: Mixing RemovedEntityPairingMixin ... into net.minecraft.server.level.ServerEntity
+[mixin/]: @Inject::aeronauticsCompatGuard$skipRemovedEntityPacket(ServerPlayer, PacketAndPayloadAcceptor, CallbackInfo) does use it's CallbackInfo
+[mixin/]: Mixing UnknownAttachmentDataMixin ... into net.neoforged.neoforge.attachment.AttachmentHolder
+[mixin/]: Mixing UnknownEntityDataMixin ... into net.minecraft.world.entity.EntityType
+[mixin/]: Mixing InvalidItemStackParseMixin ... into net.minecraft.world.item.ItemStack
+[CompatGuard] Enabled minecraft.removed_entity_tracker / minecraft.invalid_item_stack / minecraft.unknown_entity_data / neoforge.unknown_attachment
+[CompatGuard] Skipped minecolonies.create.handler_refresh: missing mod minecolonies
+[CompatGuard] Skipped craterlib.simplerpc.config_idempotency: missing mod craterlib
+[CompatGuard] Skipped sable.iris.veil.bool_uniforms: missing mod sable
+[Server thread/INFO] [CompatGuard] Startup integrity index created at .\world\.\aeronauticscompatguard\snapshots\world-...
+[Server thread/INFO] [CompatGuard] Server guard started for .\world\.
+```
+
+No mixin apply errors, no injection errors, clean shutdown ("All dimensions are saved"). The MineColonies/CraterLib mixins are `@Pseudo` and are skipped when their mod is absent, which is why they do not appear.
+
+Command output could not be captured this way: Gradle's `JavaExec` gives the server an empty stdin, so the console handler hits EOF and stops the server immediately instead of reading commands. Verifying the commands at runtime needs RCON or a real client.
+
 ## Known gaps
 
 - MineColonies/Create request and package callbacks are not wired (the mod jars are not compile dependencies); the transaction primitives are not called from mod code paths.

@@ -809,7 +809,7 @@ public final class CompatibilityServerState {
                 deleteTree(entry);
             }
             snapshotReady = true;
-            LOGGER.info("[CompatGuard] Full world snapshot created at {}", complete);
+            LOGGER.info("[CompatGuard] Startup integrity index created at {}", complete);
         } catch (IOException error) {
             LOGGER.error("[CompatGuard] Could not create full rolling world snapshot", error);
             deleteTree(staging);
