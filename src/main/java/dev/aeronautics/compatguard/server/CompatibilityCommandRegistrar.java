@@ -40,6 +40,7 @@ public final class CompatibilityCommandRegistrar {
                         + " delivered=" + status.delivered()
                         + " pendingRetries=" + status.pendingRetries()
                         + " queuedQuarantineEvents=" + status.queuedQuarantine()
+                        + " droppedBlockEntityCleanups=" + status.droppedBlockEntityCleanups()
                         + " trackedUnloadedChunks=" + status.trackedUnloadedChunks()), false);
         return 1;
     }

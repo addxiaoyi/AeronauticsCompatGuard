@@ -78,6 +78,7 @@ public final class CompatibilityServerState {
     private final Set<UUID> completedRequestIds = new HashSet<>();
     private final Set<String> pendingBlockEntityKeys = new HashSet<>();
     private final Set<String> unloadedChunkProbeKeys = new HashSet<>();
+    private long droppedBlockEntityCleanups;
     private final ConcurrentLinkedQueue<QuarantineWrite> quarantineOutbox = new ConcurrentLinkedQueue<>();
     private final AtomicInteger quarantineOutboxSize = new AtomicInteger();
     private final AtomicBoolean quarantineFlushPending = new AtomicBoolean();
@@ -219,6 +220,9 @@ public final class CompatibilityServerState {
         if (pendingBlockEntityCleanup.size() >= 4096) {
             PendingBlockEntityCleanup dropped = pendingBlockEntityCleanup.removeFirst();
             pendingBlockEntityKeys.remove(dropped.key());
+            droppedBlockEntityCleanups++;
+            LOGGER.warn("[CompatGuard] Block-entity cleanup queue full; dropped {} at {} (total dropped={})",
+                    dropped.id(), dropped.pos().toShortString(), droppedBlockEntityCleanups);
         }
         pendingBlockEntityCleanup.addLast(new PendingBlockEntityCleanup(
                 new WeakReference<>(level), pos.immutable(), id, rawData, key, 0, tick));
@@ -604,7 +608,8 @@ public final class CompatibilityServerState {
                 suspects,
                 deliveredCount,
                 retryActions.size(),
-                quarantineOutboxSize.get());
+                quarantineOutboxSize.get(),
+                droppedBlockEntityCleanups);
     }
 
     public void onChunkUnloaded(ServerLevel level, ChunkAccess chunk) {
@@ -1254,7 +1259,8 @@ public final class CompatibilityServerState {
 
     public record Status(long tick, int queuedWork, int reservations, long quarantined, long completedWork,
                          long rejectedOffThread, long lastTickNanos, long slowTicks, int trackedUnloadedChunks,
-                         long suspects, long delivered, int pendingRetries, int queuedQuarantine) {}
+                         long suspects, long delivered, int pendingRetries, int queuedQuarantine,
+                         long droppedBlockEntityCleanups) {}
 
     private record LoggedOutPlayerProbe(
             WeakReference<net.minecraft.server.level.ServerPlayer> player,
