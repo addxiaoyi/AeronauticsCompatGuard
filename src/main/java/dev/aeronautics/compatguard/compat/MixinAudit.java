@@ -22,23 +22,43 @@ public final class MixinAudit {
 
     public enum Side { BOTH, DEDICATED_SERVER, CLIENT }
 
-    public record Entry(String id, String targetClass, Side side) {}
+    public record Entry(String id, String targetClass, String method, Side side) {}
+
+    /** Declared targets, shared with the conflict inventory so both reports cannot drift apart. */
+    public record MixinTarget(String id, String className, String method) {}
+
+    public static List<MixinTarget> targets() {
+        List<MixinTarget> targets = new ArrayList<>();
+        for (Entry entry : ENTRIES) {
+            targets.add(new MixinTarget(entry.id(), entry.targetClass(), entry.method()));
+        }
+        return targets;
+    }
+
+    public static boolean isOurTarget(String className) {
+        for (Entry entry : ENTRIES) {
+            if (entry.targetClass().equals(className)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private static final List<Entry> ENTRIES = List.of(
             new Entry("minecolonies.create.handler_refresh",
-                    "com.minecolonies.core.tileentities.TileEntityColonyBuilding", Side.BOTH),
+                    "com.minecolonies.core.tileentities.TileEntityColonyBuilding", "getItemHandlerCap", Side.BOTH),
             new Entry("craterlib.simplerpc.config_idempotency",
-                    "com.hypherionmc.craterlib.core.config.ConfigController", Side.BOTH),
+                    "com.hypherionmc.craterlib.core.config.ConfigController", "register_config", Side.BOTH),
             new Entry("minecraft.removed_entity_tracker",
-                    "net.minecraft.server.level.ServerEntity", Side.BOTH),
+                    "net.minecraft.server.level.ServerEntity", "sendPairingData", Side.BOTH),
             new Entry("minecraft.invalid_item_stack",
-                    "net.minecraft.world.item.ItemStack", Side.BOTH),
+                    "net.minecraft.world.item.ItemStack", "parse", Side.BOTH),
             new Entry("minecraft.unknown_entity_data",
-                    "net.minecraft.world.entity.EntityType", Side.BOTH),
+                    "net.minecraft.world.entity.EntityType", "loadEntityRecursive", Side.BOTH),
             new Entry("neoforge.unknown_attachment",
-                    "net.neoforged.neoforge.attachment.AttachmentHolder", Side.BOTH),
+                    "net.neoforged.neoforge.attachment.AttachmentHolder", "deserializeAttachments", Side.BOTH),
             new Entry("sable.iris.veil.bool_uniforms",
-                    "net.minecraft.client.renderer.ShaderInstance", Side.CLIENT));
+                    "net.minecraft.client.renderer.ShaderInstance", "updateLocations", Side.CLIENT));
 
     private MixinAudit() {}
 

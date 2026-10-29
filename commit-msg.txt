@@ -1,12 +1,13 @@
-Audit the mixin layer instead of trusting require = 0
+Inventory other mods' mixins so overlaps are visible at runtime
 
-Every injector uses require = 0 so a target signature change cannot crash the game, which is
-also how the sendPairingData guard stayed silently inactive on NeoForge 21.1.250. Each mixin now
-carries a @Unique marker field and MixinAudit verifies it on the target class at server start
-and through /acg mixins: 4 APPLIED, 2 skipped because the optional mod is absent, 1 client-only
-skip, missing=0, on a real dedicated server.
+Mixin exposes no query for foreign injection points, but the inputs are on disk: mod jars list
+their mixin configs, configs list mixin classes, and the @Mixin/@Inject/@ModifyReturnValue
+annotations are runtime-retained. MixinInventory scans mod files and the classpath on a daemon
+thread and reports, for each of our 7 targets, which mod hits the same method and whether it
+runs before or after our fixed priority of 900 (/acg conflicts, plus a startup log).
 
-Also: explicit priority 900 on every server mixin so ordering against default-priority mods is
-deterministic, a README table of target/injection/priority/rationale, and two rules learned here:
-never probe a client class to detect the side (RuntimeDistCleaner throws and takes the server
-down), and wrap the audit so a diagnostic cannot crash the game.
+Enumeration verified live: 2 jars, 13 mixin classes, 48 ms, no overlap on a dev server that
+exposes no third-party mixins. Matching/ordering extracted into ConflictMatcher (pure Java) and
+verified by a 13-assertion harness: before/same/after ordering, class-wide overlaps, and exclusion
+of a different method or class. The first run of that harness failed on my own wrong expected
+value (3 vs 4), not on the code.

@@ -64,6 +64,37 @@ Two rules that came out of getting this wrong:
 - **`require = 0` needs a companion check.** It is what kept the game alive when
   `sendPairingData` changed, but it is also why that guard sat inactive without a single log line.
 
+## Cross-mod mixin inventory (`/acg conflicts`)
+
+Mixin does not expose "who else injects into this method" through its API, so the inventory reads the
+inputs that are on disk: every installed mod jar's mixin configs (`*.mixins.json`), the mixin classes
+they list, and the runtime-retained `@Mixin` / `@Inject` / `@ModifyReturnValue` annotations. It runs
+on a low-priority background thread at server start (bounded to 20k classes) and answers the question
+that matters when patches collide: *which mod hits my target method, and does it run before me?*
+
+Ordering is reported relative to this mod's fixed priority of 900:
+
+| Foreign priority | Meaning |
+| --- | --- |
+| < 900 | runs BEFORE us; if it cancels at HEAD, our injector never executes |
+| = 900 | order undefined between us |
+| > 900 | runs AFTER us; it sees our post-processed result |
+
+Measured on this dev server (`runServer`, NeoForge 21.1.250):
+
+```text
+[CompatGuard] Mixin inventory: 2 jars, 13 mixin classes, 0 relevant to our targets, 48 ms
+[acg conflicts] scan: jars=2 classes=13 relevant=0 state=complete
+[acg conflicts] no overlap with our 7 declared targets
+```
+
+**What that proves and what it does not:** the enumeration runs and completes (2 jars, 13 mixin
+classes) and a development environment simply does not expose third-party mixins on the classpath, so
+`relevant=0` here says nothing about a real pack. The matching/ordering logic is verified separately
+by a 13-assertion harness over `ConflictMatcher` (pure Java, no game instance): before/same/after
+ordering, class-level overlaps with no declared injection, and exclusion of a different method or a
+different target class.
+
 ## Configuration
 
 `config/aeronauticscompatguard-common.toml` (generated on first start):
