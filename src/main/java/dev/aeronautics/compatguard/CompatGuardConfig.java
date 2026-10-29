@@ -17,6 +17,7 @@ public final class CompatGuardConfig {
 
     public static final ModConfigSpec.ConfigValue<Boolean> ENTITY_CHURN_TRACKING;
     public static final ModConfigSpec.ConfigValue<Boolean> CHUNK_RETENTION_PROBES;
+    public static final ModConfigSpec.ConfigValue<Boolean> PLAYER_RETENTION_PROBES;
     public static final ModConfigSpec.ConfigValue<Boolean> AIR_BLOCK_ENTITY_SCAN;
     public static final ModConfigSpec.ConfigValue<Boolean> STARTUP_INTEGRITY_INDEX;
     public static final ModConfigSpec.ConfigValue<Integer> STARTUP_INDEX_MAX_HASHED_BYTES;
@@ -33,6 +34,11 @@ public final class CompatGuardConfig {
                 .comment("Keep a weak reference per unloaded chunk to detect retained chunk objects.",
                         "Costs one queue entry per chunk unload (bounded to 4096).")
                 .define("chunkRetentionProbes", false);
+        PLAYER_RETENTION_PROBES = builder
+                .comment("Keep a weak reference per logout to detect ServerPlayer objects that stay reachable.",
+                        "Enable when a leak reporter (e.g. AllTheLeaks) shows retained ServerPlayer instances;",
+                        "each retained player keeps its ServerLevel and therefore its chunks alive.")
+                .define("playerRetentionProbes", false);
         builder.pop();
 
         builder.push("safety");

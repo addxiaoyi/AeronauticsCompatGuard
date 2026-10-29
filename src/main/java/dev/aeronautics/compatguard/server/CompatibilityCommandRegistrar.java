@@ -22,7 +22,8 @@ public final class CompatibilityCommandRegistrar {
                 .then(Commands.literal("selftest").executes(context -> selfTest(context.getSource())))
                 .then(Commands.literal("bench").executes(context -> bench(context.getSource())))
                 .then(Commands.literal("mixins").executes(context -> mixins(context.getSource())))
-                .then(Commands.literal("conflicts").executes(context -> conflicts(context.getSource()))));
+                .then(Commands.literal("conflicts").executes(context -> conflicts(context.getSource())))
+                .then(Commands.literal("leaks").executes(context -> leaks(context.getSource()))));
     }
 
     private static int status(CommandSourceStack source) {
@@ -61,6 +62,13 @@ public final class CompatibilityCommandRegistrar {
     private static int mixins(CommandSourceStack source) {
         for (String line : dev.aeronautics.compatguard.compat.MixinAudit.report()) {
             source.sendSuccess(() -> Component.literal("[acg mixins] " + line), false);
+        }
+        return 1;
+    }
+
+    private static int leaks(CommandSourceStack source) {
+        for (String line : state(source).loggedOutPlayerReport()) {
+            source.sendSuccess(() -> Component.literal("[acg leaks] " + line), false);
         }
         return 1;
     }

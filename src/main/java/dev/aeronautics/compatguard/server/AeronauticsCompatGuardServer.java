@@ -71,6 +71,13 @@ public final class AeronauticsCompatGuardServer {
     }
 
     @SubscribeEvent
+    public void onPlayerLogout(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
+            CompatibilityServerState.get(player.server).trackPlayerLogout(player);
+        }
+    }
+
+    @SubscribeEvent
     public void onChunkLoad(ChunkEvent.Load event) {
         if (!(event.getLevel() instanceof net.minecraft.server.level.ServerLevel level)) {
             return;

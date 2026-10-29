@@ -1,13 +1,12 @@
-Inventory other mods' mixins so overlaps are visible at runtime
+Turn the shipped server log into leak attribution
 
-Mixin exposes no query for foreign injection points, but the inputs are on disk: mod jars list
-their mixin configs, configs list mixin classes, and the @Mixin/@Inject/@ModifyReturnValue
-annotations are runtime-retained. MixinInventory scans mod files and the classpath on a daemon
-thread and reports, for each of our 7 targets, which mod hits the same method and whether it
-runs before or after our fixed priority of 900 (/acg conflicts, plus a startup log).
+The supplied log (1663 lines) is dominated by one vanilla warning: 800 of 821 WARN lines are
+'Fetching packet for removed entity ItemEntity[...]' (8 entities x 99 repeats), which fires from
+ServerEntity#sendPairingData -- the exact method RemovedEntityPairingMixin cancels at HEAD. The
+bytecode confirms vanilla logs isRemoved() and then still builds the add-entity packet and pairing
+data, so the guard removes real work rather than just noise.
 
-Enumeration verified live: 2 jars, 13 mixin classes, 48 ms, no overlap on a dev server that
-exposes no third-party mixins. Matching/ordering extracted into ConflictMatcher (pure Java) and
-verified by a 13-assertion harness: before/same/after ordering, class-wide overlaps, and exclusion
-of a different method or class. The first run of that harness failed on my own wrong expected
-value (3 vs 4), not on the code.
+The same log shows AllTheLeaks retaining 32 ServerPlayer and 2276 LevelChunk objects at +1098MB.
+A retained ServerPlayer keeps its ServerLevel and therefore its chunks, so /acg leaks now reports
+logged-out players that are still strongly reachable next to the unloaded-chunk probes. Nothing is
+freed: attribution only, because this mod cannot free what another mod holds.

@@ -95,6 +95,24 @@ by a 13-assertion harness over `ConflictMatcher` (pure Java, no game instance): 
 ordering, class-level overlaps with no declared injection, and exclusion of a different method or a
 different target class.
 
+## Leak attribution (`/acg leaks`)
+
+AllTheLeaks reports counts, not causes. `/acg leaks` reports the two chains this mod can observe
+cheaply: logged-out players that are still strongly reachable, and unloaded chunks that are still
+reachable. A retained `ServerPlayer` keeps its `ServerLevel`, which keeps its chunks, so the player
+count is the leading indicator.
+
+Both probe sets default to **off**; enable them when a leak reporter already shows retention:
+
+```text
+[acg leaks] playerRetentionProbes=false tracked=0 stillReachable=0 oldestTicks=0
+[acg leaks] chunkRetentionProbes=false unloadedProbes=0
+```
+
+Nothing is freed here -- this mod cannot free what another mod holds. The value is attribution: if
+the retained player count grows together with the chunk count, the player leak is the root cause and
+the chunk growth is downstream.
+
 ## Configuration
 
 `config/aeronauticscompatguard-common.toml` (generated on first start):

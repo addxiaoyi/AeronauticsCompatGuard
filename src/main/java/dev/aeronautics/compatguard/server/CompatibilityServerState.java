@@ -68,6 +68,7 @@ public final class CompatibilityServerState {
     private final Deque<Runnable> work = new ArrayDeque<>();
     private final Map<UUID, Reservation> reservations = new HashMap<>();
     private final Deque<UnloadedChunkProbe> unloadedChunkProbes = new ArrayDeque<>();
+    private final Deque<LoggedOutPlayerProbe> loggedOutPlayers = new ArrayDeque<>();
     private final Deque<PendingBlockEntityCleanup> pendingBlockEntityCleanup = new ArrayDeque<>();
     private final Map<UUID, EntityProbe> trackedEntities = new HashMap<>();
     private final Map<String, EntityChurn> entityChurn = new HashMap<>();
@@ -172,6 +173,7 @@ public final class CompatibilityServerState {
         if (tick % 1200L == 0L) {
             reportRetainedUnloadedChunks();
             reportEntityChurn();
+            reportLoggedOutPlayers();
         }
         processBlockEntityCleanup();
         runDueRetries();
@@ -628,6 +630,71 @@ public final class CompatibilityServerState {
                 tick));
     }
 
+    /**
+     * Remembers a logged-out player weakly so a retained {@code ServerPlayer} can be spotted.
+     *
+     * <p>Motivation is a real server log: AllTheLeaks reported 32 retained {@code ServerPlayer}
+     * instances next to 2276 retained {@code LevelChunk}s and +1098MB. A retained player keeps its
+     * {@code ServerLevel}, which in turn keeps its chunks, so the player count is the cheap leading
+     * indicator. Nothing is freed here -- this mod cannot free what another mod holds -- but the
+     * count tells the pack author whether the chunk growth is downstream of the player leak.</p>
+     */
+    public void trackPlayerLogout(net.minecraft.server.level.ServerPlayer player) {
+        if (!CompatGuardConfig.flag(CompatGuardConfig.PLAYER_RETENTION_PROBES, false)) {
+            return;
+        }
+        requireServerThread();
+        if (loggedOutPlayers.size() >= 4096) {
+            loggedOutPlayers.removeFirst();
+        }
+        loggedOutPlayers.addLast(new LoggedOutPlayerProbe(
+                new WeakReference<>(player), player.getGameProfile().getName(), tick));
+    }
+
+    /** Number of logged-out players that are still strongly reachable. Prunes collected probes. */
+    public int retainedLoggedOutPlayers() {
+        int retained = 0;
+        var iterator = loggedOutPlayers.iterator();
+        while (iterator.hasNext()) {
+            LoggedOutPlayerProbe probe = iterator.next();
+            if (probe.player().get() == null) {
+                iterator.remove();
+                continue;
+            }
+            retained++;
+        }
+        return retained;
+    }
+
+    public List<String> loggedOutPlayerReport() {
+        List<String> lines = new ArrayList<>();
+        int retained = 0;
+        int oldestTicks = 0;
+        var iterator = loggedOutPlayers.iterator();
+        while (iterator.hasNext()) {
+            LoggedOutPlayerProbe probe = iterator.next();
+            if (probe.player().get() == null) {
+                iterator.remove();
+                continue;
+            }
+            retained++;
+            oldestTicks = Math.max(oldestTicks, (int) (tick - probe.loggedOutAtTick()));
+        }
+        lines.add("playerRetentionProbes=" + CompatGuardConfig.flag(
+                CompatGuardConfig.PLAYER_RETENTION_PROBES, false)
+                + " tracked=" + loggedOutPlayers.size()
+                + " stillReachable=" + retained
+                + " oldestTicks=" + oldestTicks);
+        lines.add("chunkRetentionProbes=" + CompatGuardConfig.flag(
+                CompatGuardConfig.CHUNK_RETENTION_PROBES, false)
+                + " unloadedProbes=" + unloadedChunkProbes.size());
+        if (retained > 0) {
+            lines.add("a retained ServerPlayer keeps its ServerLevel and its chunks reachable;"
+                    + " if chunk counts grow with this number, the player is the root cause");
+        }
+        return lines;
+    }
+
     public void trackEntityJoin(Entity entity) {
         if (!CompatGuardConfig.flag(CompatGuardConfig.ENTITY_CHURN_TRACKING, false)) {
             return;
@@ -695,6 +762,14 @@ public final class CompatibilityServerState {
         if (retained > 0) {
             LOGGER.warn("[CompatGuard] {} unloaded chunk objects remain strongly reachable after 60 seconds: {}",
                     retained, byDimension);
+        }
+    }
+
+    private void reportLoggedOutPlayers() {
+        int retained = retainedLoggedOutPlayers();
+        if (retained > 0) {
+            LOGGER.warn("[CompatGuard] {} logged-out player object(s) are still strongly reachable; "
+                    + "each one keeps its level and chunks alive (AllTheLeaks-style leak)", retained);
         }
     }
 
@@ -1158,6 +1233,12 @@ public final class CompatibilityServerState {
     public record Status(long tick, int queuedWork, int reservations, long quarantined, long completedWork,
                          long rejectedOffThread, long lastTickNanos, long slowTicks, int trackedUnloadedChunks,
                          long suspects, long delivered, int pendingRetries, int queuedQuarantine) {}
+
+    private record LoggedOutPlayerProbe(
+            WeakReference<net.minecraft.server.level.ServerPlayer> player,
+            String name,
+            long loggedOutAtTick
+    ) {}
 
     private record UnloadedChunkProbe(
             String key,
