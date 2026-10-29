@@ -52,8 +52,13 @@ public abstract class LootTableParseGuardMixin {
                 "loot_table_parse_failure",
                 id.toString(),
                 self.registryKey().location().toString(),
-                "loot table failed to parse; substituted the codec default so the id resolves to an empty table",
+                "loot table failed to parse; recorded only, the id stays absent",
                 "type=" + self.registryKey().location());
-        return Optional.ofNullable(defaultValue);
+        // Substituting the codec default was wrong: LootDataType.TABLE's defaultValue is the shared
+        // LootTable.EMPTY singleton (javap: getstatic LootTable.EMPTY), so every failed table handed
+        // the same instance to ReloadableServerRegistries, which then threw
+        // "Adding duplicate value 'LootTable@2a1d9270' to registry" and the server refused to start.
+        // Recording without substituting keeps the failed id absent, exactly like vanilla.
+        return original;
     }
 }

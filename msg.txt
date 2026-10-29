@@ -1,5 +1,14 @@
-Bump to 0.1.2: stop probing client classes on a dedicated server
+0.1.3: stop substituting the shared LootTable.EMPTY (it crashed datapack load)
 
-0.1.1 was tagged before the fix landed, so the release produced from it still logs
-"Attempted to load class net/minecraft/client/renderer/ShaderInstance for invalid dist".
-This bump exists so the tag, the jar name and the fix line up.
+A server log showed the mod's own guard aborting startup:
+  Failed to load datapacks, can't proceed with server load
+  java.lang.IllegalStateException: Adding duplicate value
+  'net.minecraft.world.level.storage.loot.LootTable@2a1d9270' to registry
+  at net.minecraft.server.ReloadableServerRegistries.lambda$scheduleElementParse$2
+
+Cause: javap on LootDataType shows TABLE's defaultValue is the shared LootTable.EMPTY
+singleton (getstatic LootTable.EMPTY). The guard returned that same instance for every table that
+failed to parse, so two failures registered one object twice and MappedRegistry rejected it.
+
+The guard now only records the failure and returns the original empty Optional, so a broken id
+stays absent exactly like vanilla. Recorded in the quarantine manifest either way.
