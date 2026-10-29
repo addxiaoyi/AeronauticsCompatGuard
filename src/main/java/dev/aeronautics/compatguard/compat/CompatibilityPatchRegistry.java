@@ -155,6 +155,12 @@ public final class CompatibilityPatchRegistry {
         }
 
         try {
+            if (isClientOnlyClass(adapter.targetClass()) && !isClientDist()) {
+                // Probing a client class on a dedicated server is not a silent miss: RuntimeDistCleaner
+                // writes "Attempted to load class ... for invalid dist" as an ERROR before throwing.
+                // A real server log showed exactly that for ShaderInstance, caused by this very check.
+                return "client-only target on a dedicated server";
+            }
             ClassLoader loader = Thread.currentThread().getContextClassLoader();
             Class<?> owner = Class.forName(adapter.targetClass(), false, loader);
             Class<?>[] parameterTypes = adapter.parameterTypes().stream()
@@ -164,6 +170,19 @@ public final class CompatibilityPatchRegistry {
             return null;
         } catch (ReflectiveOperationException | LinkageError | RuntimeException error) {
             return "target API unavailable: " + adapter.targetClass() + "#" + adapter.targetMethod();
+        }
+    }
+
+    private static boolean isClientOnlyClass(String name) {
+        return name.startsWith("net.minecraft.client.") || name.startsWith("com.mojang.blaze3d.");
+    }
+
+    private static boolean isClientDist() {
+        try {
+            return net.neoforged.fml.loading.FMLEnvironment.dist
+                    == net.neoforged.api.distmarker.Dist.CLIENT;
+        } catch (RuntimeException | LinkageError unavailable) {
+            return false;
         }
     }
 

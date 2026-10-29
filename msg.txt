@@ -1,0 +1,13 @@
+Stop probing client classes on a dedicated server
+
+A real server log with this mod installed showed one ERROR written by our own code:
+  RuntimeDistCleaner/DISTXFORM: Attempted to load class net/minecraft/client/renderer/ShaderInstance
+  for invalid dist DEDICATED_SERVER
+immediately followed by
+  [CompatGuard] Skipped sable.iris.veil.bool_uniforms: target API unavailable ...ShaderInstance#updateLocations
+
+The availability check reflected on a client-only class, and RuntimeDistCleaner logs an ERROR before
+throwing. CompatibilityPatchRegistry now returns 'client-only target on a dedicated server' for
+net.minecraft.client.* and com.mojang.blaze3d.* targets without touching the class, using
+FMLEnvironment.dist to decide. Verified locally: 0 'Attempted to load class net/minecraft/client'
+lines in a full runServer boot.
